@@ -47,19 +47,45 @@ TRADE_SETTLEMENT_CONTRACT_ADDRESS = os.getenv(
 # environment variables for deployment.
 SUPPORTED_NETWORKS = {
     "hedera": {
-        # Hedera Hashio Testnet RPC
         "rpc": os.getenv("WEB3_PROVIDER_HEDERA", "https://testnet.hashio.io/api"),
-        # Hedera Testnet chain id
         "chain_id": int(os.getenv("WEB3_CHAIN_ID_HEDERA", "296")),
         "contract_address": os.getenv(
             "TRADE_SETTLE_CONTRACT_ADDRESS_HEDERA", TRADE_SETTLEMENT_CONTRACT_ADDRESS
         ),
     },
+    "ethereum": {
+        "rpc": os.getenv("WEB3_PROVIDER_ETHEREUM", "https://mainnet.infura.io/v3/YOUR_KEY"),
+        "chain_id": int(os.getenv("WEB3_CHAIN_ID_ETHEREUM", "1")),
+        "contract_address": os.getenv(
+            "TRADE_SETTLE_CONTRACT_ADDRESS_ETHEREUM", TRADE_SETTLEMENT_CONTRACT_ADDRESS
+        ),
+    },
     "polygon": {
-        "rpc": os.getenv("WEB3_PROVIDER_POLYGON", "https://your-ethereum-node.com"),
-        "chain_id": int(os.getenv("WEB3_CHAIN_ID_POLYGON", "0")),
+        "rpc": os.getenv("WEB3_PROVIDER_POLYGON", "https://polygon-rpc.com"),
+        "chain_id": int(os.getenv("WEB3_CHAIN_ID_POLYGON", "137")),
         "contract_address": os.getenv(
             "TRADE_SETTLE_CONTRACT_ADDRESS_POLYGON", TRADE_SETTLEMENT_CONTRACT_ADDRESS
+        ),
+    },
+    "bsc": {
+        "rpc": os.getenv("WEB3_PROVIDER_BSC", "https://bsc-dataseed.binance.org"),
+        "chain_id": int(os.getenv("WEB3_CHAIN_ID_BSC", "56")),
+        "contract_address": os.getenv(
+            "TRADE_SETTLE_CONTRACT_ADDRESS_BSC", TRADE_SETTLEMENT_CONTRACT_ADDRESS
+        ),
+    },
+    "celo": {
+        "rpc": os.getenv("WEB3_PROVIDER_CELO", "https://forno.celo.org"),
+        "chain_id": int(os.getenv("WEB3_CHAIN_ID_CELO", "42220")),
+        "contract_address": os.getenv(
+            "TRADE_SETTLE_CONTRACT_ADDRESS_CELO", TRADE_SETTLEMENT_CONTRACT_ADDRESS
+        ),
+    },
+    "base": {
+        "rpc": os.getenv("WEB3_PROVIDER_BASE", "https://mainnet.base.org"),
+        "chain_id": int(os.getenv("WEB3_CHAIN_ID_BASE", "8453")),
+        "contract_address": os.getenv(
+            "TRADE_SETTLE_CONTRACT_ADDRESS_BASE", TRADE_SETTLEMENT_CONTRACT_ADDRESS
         ),
     },
 }
@@ -101,13 +127,39 @@ try:
 except Exception:
     CONTRACT_ABI = []  # fallback
 
-# Token address mapping - you should expand this
 TOKEN_ADDRESSES = {
     "HBAR": os.getenv(
         "HBAR_TOKEN_ADDRESS", "0xb1F616b8134F602c3Bb465fB5b5e6565cCAd37Ed"
     ),
     "USDT": os.getenv(
         "USDT_TOKEN_ADDRESS", "0xc8B47803222A02F4FFF1727C6b8A4F2E779F672E"
+    ),
+    "xZAR_ETH": os.getenv(
+        "XZAR_ETH_ADDRESS", "0x48f07301e9e29c3c38a80ae8d9ae771f224f1054"
+    ),
+    "xZAR_POLYGON": os.getenv(
+        "XZAR_POLYGON_ADDRESS", "0x30DE46509Dbc3a491128F97be0aaf70dc7ff33cb"
+    ),
+    "cNGN_ETH": os.getenv(
+        "CNGN_ETH_ADDRESS", "0x17CDB2a01e7a34CbB3DD4b83260B05d0274C8dab"
+    ),
+    "cNGN_BSC": os.getenv(
+        "CNGN_BSC_ADDRESS", "0xa8AEA66B361a8d53e8865c62D142167Af28Af058"
+    ),
+    "cNGN_POLYGON": os.getenv(
+        "CNGN_POLYGON_ADDRESS", "0x52828daa48C1a9A06F37500882b42daf0bE04C3B"
+    ),
+    "cNGN_BASE": os.getenv(
+        "CNGN_BASE_ADDRESS", "0x46C85152bFe9f96829aA94755D9f915F9B10EF5F"
+    ),
+    "cKES_CELO": os.getenv(
+        "CKES_CELO_ADDRESS", "0x456a3D042C0DbD3db53D5489e98dFb038553B0d0"
+    ),
+    "cZAR_CELO": os.getenv(
+        "CZAR_CELO_ADDRESS", "0x4c35853A3B4e647fD266f4de678dCc8fEC410BF6"
+    ),
+    "cGHS_CELO": os.getenv(
+        "CGHS_CELO_ADDRESS", "0xfAeA5F3404bbA20D3cc2f8C4B0A888F55a3c7313"
     ),
 }
 

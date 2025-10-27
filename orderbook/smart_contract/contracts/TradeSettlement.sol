@@ -14,21 +14,29 @@ contract TradeSettlement is ReentrancyGuard, Ownable {
 
     struct CrossChainTradeData {
         bytes32 orderId;
-        address party1;                 // Trader on source chain
-        address party2;                 // Trader on destination chain
-        address party1ReceiveWallet;    // Where party1 receives on destination chain
-        address party2ReceiveWallet;    // Where party2 receives on source chain
-        address baseAsset;              // Base asset address (on respective chains)
-        address quoteAsset;             // Quote asset address (on respective chains)
-        uint256 price;                  // Price in quote asset per base asset (18 decimals)
-        uint256 quantity;               // Quantity of base asset
-        string party1Side;              // "bid" or "ask"
-        string party2Side;              // "ask" or "bid" (opposite of party1)
-        uint256 sourceChainId;          // ChainA
-        uint256 destinationChainId;     // ChainB
+        address party1;
+        address party2;
+        address party1ReceiveWallet;
+        address party2ReceiveWallet;
+        address baseAsset;
+        address quoteAsset;
+        uint256 price;
+        uint256 quantity;
+        string party1Side;
+        string party2Side;
+        uint256 sourceChainId;
+        uint256 destinationChainId;
         uint256 timestamp;
         uint256 nonce1;
         uint256 nonce2;
+    }
+
+    struct SettlementStatus {
+        bool sourceChainSettled;
+        bool destinationChainSettled;
+        uint256 sourceChainTimestamp;
+        uint256 destinationChainTimestamp;
+        bool refunded;
     }
 
     // Escrow mappings
@@ -40,6 +48,8 @@ contract TradeSettlement is ReentrancyGuard, Ownable {
     mapping(bytes32 => bool) public settledCrossChainOrders;
     mapping(address => mapping(address => uint256)) public nonces;
     mapping(bytes32 => bool) public executedTrades;
+    mapping(bytes32 => SettlementStatus) public settlementStatuses;
+    mapping(bytes32 => mapping(uint256 => bool)) public settlementByChain;
 
     // Events
     event EscrowDepositEvent(
@@ -73,6 +83,32 @@ contract TradeSettlement is ReentrancyGuard, Ownable {
         bool isSourceChain,
         uint256 timestamp
     );
+
+    event SettlementFailed(
+        bytes32 indexed orderId,
+        uint256 chainId,
+        bool isSourceChain,
+        string reason,
+        uint256 timestamp
+    );
+
+    event AsymmetricSettlementDetected(
+        bytes32 indexed orderId,
+        uint256 settledChainId,
+        uint256 failedChainId,
+        uint256 timestamp
+    );
+
+    event EmergencyRefund(
+        bytes32 indexed orderId,
+        address indexed user,
+        address indexed token,
+        uint256 amount,
+        uint256 chainId,
+        uint256 timestamp
+    );
+
+    uint256 public constant SETTLEMENT_TIMEOUT = 1 hours;
 
     constructor() Ownable(msg.sender) {}
 
@@ -311,21 +347,24 @@ contract TradeSettlement is ReentrancyGuard, Ownable {
         address recovered = ethSignedHash.recover(matchingEngineSignature);
         require(recovered == owner(), "Invalid matching engine signature");
 
-        // Mark as settled
         settledCrossChainOrders[tradeData.orderId] = true;
 
-        // Calculate amounts
+        uint256 currentChainId = block.chainid;
+        settlementByChain[tradeData.orderId][currentChainId] = true;
+
         uint256 baseAmount = tradeData.quantity;
         uint256 quoteAmount = (tradeData.quantity * tradeData.price) / 1e18;
 
-        // Execute settlement based on which chain we're on
         if (isSourceChain) {
             _settleSourceChain(tradeData, baseAmount, quoteAmount);
+            settlementStatuses[tradeData.orderId].sourceChainSettled = true;
+            settlementStatuses[tradeData.orderId].sourceChainTimestamp = block.timestamp;
         } else {
             _settleDestinationChain(tradeData, baseAmount, quoteAmount);
+            settlementStatuses[tradeData.orderId].destinationChainSettled = true;
+            settlementStatuses[tradeData.orderId].destinationChainTimestamp = block.timestamp;
         }
 
-        // Update nonces
         nonces[tradeData.party1][tradeData.baseAsset] = tradeData.nonce1 + 1;
         nonces[tradeData.party2][tradeData.baseAsset] = tradeData.nonce2 + 1;
     }
@@ -474,5 +513,141 @@ contract TradeSettlement is ReentrancyGuard, Ownable {
         locked = lockedBalances[user][token];
         available = total - locked;
         return (total, available, locked);
+    }
+
+    function reportSettlementFailure(
+        bytes32 orderId,
+        uint256 failedChainId,
+        bool isSourceChain,
+        string memory reason
+    ) external onlyOwner {
+        emit SettlementFailed(orderId, failedChainId, isSourceChain, reason, block.timestamp);
+
+        SettlementStatus storage status = settlementStatuses[orderId];
+
+        if (isSourceChain && status.destinationChainSettled && !status.sourceChainSettled) {
+            emit AsymmetricSettlementDetected(
+                orderId,
+                failedChainId == status.sourceChainTimestamp ? failedChainId : block.chainid,
+                failedChainId,
+                block.timestamp
+            );
+        } else if (!isSourceChain && status.sourceChainSettled && !status.destinationChainSettled) {
+            emit AsymmetricSettlementDetected(
+                orderId,
+                failedChainId == status.destinationChainTimestamp ? failedChainId : block.chainid,
+                failedChainId,
+                block.timestamp
+            );
+        }
+    }
+
+    function emergencyRefundAsymmetricSettlement(
+        bytes32 orderId,
+        CrossChainTradeData memory tradeData,
+        bytes memory settlementProof
+    ) external nonReentrant onlyOwner {
+        SettlementStatus storage status = settlementStatuses[orderId];
+
+        require(!status.refunded, "Already refunded");
+        require(
+            status.sourceChainSettled != status.destinationChainSettled,
+            "Not an asymmetric settlement"
+        );
+
+        uint256 currentChainId = block.chainid;
+        bool isSourceChain = currentChainId == tradeData.sourceChainId;
+
+        require(
+            settlementByChain[orderId][currentChainId],
+            "Settlement not executed on this chain"
+        );
+
+        if (isSourceChain && status.sourceChainSettled) {
+            uint256 baseAmount = tradeData.quantity;
+            address refundRecipient;
+
+            if (keccak256(abi.encodePacked(tradeData.party1Side)) == keccak256(abi.encodePacked("ask"))) {
+                refundRecipient = tradeData.party1;
+            } else {
+                revert("Invalid refund configuration");
+            }
+
+            IERC20 baseToken = IERC20(tradeData.baseAsset);
+            require(
+                baseToken.transferFrom(tradeData.party2ReceiveWallet, refundRecipient, baseAmount),
+                "Refund transfer failed"
+            );
+
+            emit EmergencyRefund(
+                orderId,
+                refundRecipient,
+                tradeData.baseAsset,
+                baseAmount,
+                currentChainId,
+                block.timestamp
+            );
+        } else if (!isSourceChain && status.destinationChainSettled) {
+            uint256 quoteAmount = (tradeData.quantity * tradeData.price) / 1e18;
+            address refundRecipient;
+
+            if (keccak256(abi.encodePacked(tradeData.party2Side)) == keccak256(abi.encodePacked("bid"))) {
+                refundRecipient = tradeData.party2;
+            } else {
+                revert("Invalid refund configuration");
+            }
+
+            IERC20 quoteToken = IERC20(tradeData.quoteAsset);
+            require(
+                quoteToken.transferFrom(tradeData.party1ReceiveWallet, refundRecipient, quoteAmount),
+                "Refund transfer failed"
+            );
+
+            emit EmergencyRefund(
+                orderId,
+                refundRecipient,
+                tradeData.quoteAsset,
+                quoteAmount,
+                currentChainId,
+                block.timestamp
+            );
+        }
+
+        status.refunded = true;
+    }
+
+    function getSettlementStatus(
+        bytes32 orderId
+    ) external view returns (
+        bool sourceChainSettled,
+        bool destinationChainSettled,
+        uint256 sourceChainTimestamp,
+        uint256 destinationChainTimestamp,
+        bool refunded
+    ) {
+        SettlementStatus memory status = settlementStatuses[orderId];
+        return (
+            status.sourceChainSettled,
+            status.destinationChainSettled,
+            status.sourceChainTimestamp,
+            status.destinationChainTimestamp,
+            status.refunded
+        );
+    }
+
+    function checkAsymmetricSettlement(
+        bytes32 orderId,
+        uint256 sourceChainId,
+        uint256 destinationChainId
+    ) external view returns (bool isAsymmetric, uint256 settledChainId) {
+        SettlementStatus memory status = settlementStatuses[orderId];
+
+        if (status.sourceChainSettled && !status.destinationChainSettled) {
+            return (true, sourceChainId);
+        } else if (!status.sourceChainSettled && status.destinationChainSettled) {
+            return (true, destinationChainId);
+        }
+
+        return (false, 0);
     }
 }
