@@ -1,0 +1,8 @@
+Enter RPC URL (e.g., https://eth-mainnet.alchemyapi.io/v2/YOUR-API-KEY): https://evm-rpc-testnet.hedera-apis.com
+Enter your private key: b8e09a5447e006e9163b470921991c245683b2cb2ebd6eefcfae5e7d73d574d6 "agent"
+Enter your private key: b7117fbd364407f530adb2db28292360c9d5e93182b65c4c0cde7b27e7d12b36 "main"
+
+Enter token contract address: 0x54099052D0e04a5CF24e4c7c82eA693Fb25E0Bed[USDT]
+0x8eFcF5c2DDDA6C1A63D8395965Ca6c0609CE32D5[HBAR]
+Enter spender contract address: 0xF14dbF48b727AD8346dD8Fa6C0FC42FCb81FF115
+Enter amount to approve (in tokens, e.g., 100): 1000

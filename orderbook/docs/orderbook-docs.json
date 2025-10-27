@@ -1,0 +1,207 @@
+{
+    "info": {
+        "name": "Cross-Chain Orderbook API",
+        "description": "API for managing cross-chain order books with trade settlement capabilities. Supports order registration, cancellation, retrieval, and settlement health checks.",
+        "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json",
+        "version": "1.0.0"
+    },
+    "variable": [
+        {
+            "key": "base_url",
+            "value": "http://localhost:8001",
+            "type": "string"
+        }
+    ],
+    "item": [
+        {
+            "name": "Register Order",
+            "request": {
+                "method": "POST",
+                "header": [
+                    {
+                        "key": "Content-Type",
+                        "value": "application/json"
+                    }
+                ],
+                "body": {
+                    "mode": "raw",
+                    "raw": "{\n  \"type\": \"limit\",\n  \"account\": \"0x1234567890123456789012345678901234567890\",\n  \"from_network\": \"hedera\",\n  \"to_network\": \"polygon\",\n  \"receive_wallet\": \"0x0987654321098765432109876543210987654321\",\n  \"price\": \"1.5\",\n  \"quantity\": \"100\",\n  \"side\": \"buy\",\n  \"baseAsset\": \"HBAR\",\n  \"quoteAsset\": \"USDT\",\n  \"privateKey\": \"your_private_key_here\"\n}"
+                },
+                "url": {
+                    "raw": "{{base_url}}/api/register_order",
+                    "host": [
+                        "{{base_url}}"
+                    ],
+                    "path": [
+                        "api",
+                        "register_order"
+                    ]
+                },
+                "description": "Register a new order in the orderbook. The order will be validated for balance and allowance before being processed. If the order matches with existing orders, trades will be settled automatically.\n\n**Required Fields:**\n- `account`: Wallet address of the user\n- `from_network`: Source blockchain network (e.g., \"hedera\", \"polygon\")\n- `to_network`: Destination blockchain network\n- `price`: Order price (string format for precision)\n- `quantity`: Order quantity (string format for precision)\n- `side`: \"buy\" or \"sell\"\n- `baseAsset`: Base asset symbol (e.g., \"HBAR\")\n- `quoteAsset`: Quote asset symbol (e.g., \"USDT\")\n- `privateKey`: Private key for signing transactions\n\n**Optional Fields:**\n- `type`: Order type (default: \"limit\")\n- `receive_wallet`: Wallet address to receive assets on destination chain (defaults to account if not provided)\n- `receiveWallet`: Alternative field name for receive_wallet"
+            },
+            "response": []
+        },
+        {
+            "name": "Cancel Order",
+            "request": {
+                "method": "POST",
+                "header": [
+                    {
+                        "key": "Content-Type",
+                        "value": "application/json"
+                    }
+                ],
+                "body": {
+                    "mode": "raw",
+                    "raw": "{\n  \"orderId\": 12345,\n  \"side\": \"buy\",\n  \"baseAsset\": \"HBAR\",\n  \"quoteAsset\": \"USDT\"\n}"
+                },
+                "url": {
+                    "raw": "{{base_url}}/api/cancel_order",
+                    "host": [
+                        "{{base_url}}"
+                    ],
+                    "path": [
+                        "api",
+                        "cancel_order"
+                    ]
+                },
+                "description": "Cancel an existing order from the orderbook.\n\n**Required Fields:**\n- `orderId`: The unique identifier of the order to cancel\n- `side`: Order side (\"buy\" or \"sell\")\n- `baseAsset`: Base asset symbol\n- `quoteAsset`: Quote asset symbol"
+            },
+            "response": []
+        },
+        {
+            "name": "Get Order",
+            "request": {
+                "method": "POST",
+                "header": [
+                    {
+                        "key": "Content-Type",
+                        "value": "application/x-www-form-urlencoded"
+                    }
+                ],
+                "body": {
+                    "mode": "urlencoded",
+                    "urlencoded": [
+                        {
+                            "key": "payload",
+                            "value": "{\"orderId\": 12345}",
+                            "type": "text"
+                        }
+                    ]
+                },
+                "url": {
+                    "raw": "{{base_url}}/api/order",
+                    "host": [
+                        "{{base_url}}"
+                    ],
+                    "path": [
+                        "api",
+                        "order"
+                    ]
+                },
+                "description": "Retrieve details of a specific order by its ID.\n\n**Payload Format:**\nThe payload should be a JSON string sent as form data:\n```json\n{\n  \"orderId\": 12345\n}\n```"
+            },
+            "response": []
+        },
+        {
+            "name": "Get Orderbook",
+            "request": {
+                "method": "POST",
+                "header": [
+                    {
+                        "key": "Content-Type",
+                        "value": "application/json"
+                    }
+                ],
+                "body": {
+                    "mode": "raw",
+                    "raw": "{\n  \"symbol\": \"HBAR_USDT\"\n}"
+                },
+                "url": {
+                    "raw": "{{base_url}}/api/orderbook",
+                    "host": [
+                        "{{base_url}}"
+                    ],
+                    "path": [
+                        "api",
+                        "orderbook"
+                    ]
+                },
+                "description": "Retrieve the current state of the orderbook for a specific trading pair.\n\n**Required Fields:**\n- `symbol`: Trading pair in format \"BASE_QUOTE\" (e.g., \"HBAR_USDT\")"
+            },
+            "response": []
+        },
+        {
+            "name": "Get Settlement Address",
+            "request": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                    "raw": "{{base_url}}/api/get_settlement_address",
+                    "host": [
+                        "{{base_url}}"
+                    ],
+                    "path": [
+                        "api",
+                        "get_settlement_address"
+                    ]
+                },
+                "description": "Retrieve the smart contract address used for trade settlement.\n\n**Returns:**\n- `settlement_address`: The Ethereum/Hedera contract address for settlement"
+            },
+            "response": []
+        },
+        {
+            "name": "Check Available Funds",
+            "request": {
+                "method": "POST",
+                "header": [
+                    {
+                        "key": "Content-Type",
+                        "value": "application/x-www-form-urlencoded"
+                    }
+                ],
+                "body": {
+                    "mode": "urlencoded",
+                    "urlencoded": [
+                        {
+                            "key": "payload",
+                            "value": "{\"account\": \"0x1234567890123456789012345678901234567890\", \"asset\": \"HBAR\"}",
+                            "type": "text"
+                        }
+                    ]
+                },
+                "url": {
+                    "raw": "{{base_url}}/api/check_available_funds",
+                    "host": [
+                        "{{base_url}}"
+                    ],
+                    "path": [
+                        "api",
+                        "check_available_funds"
+                    ]
+                },
+                "description": "Check the amount of funds locked in open orders for a specific account and asset.\n\n**Payload Format:**\nThe payload should be a JSON string sent as form data:\n```json\n{\n  \"account\": \"0x1234567890123456789012345678901234567890\",\n  \"asset\": \"HBAR\"\n}\n```\n\n**Returns:**\n- `lockedAmount`: Total amount of the specified asset locked in open orders\n- `account`: The queried account address\n- `asset`: The queried asset symbol"
+            },
+            "response": []
+        },
+        {
+            "name": "Settlement Health Check",
+            "request": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                    "raw": "{{base_url}}/api/settlement_health",
+                    "host": [
+                        "{{base_url}}"
+                    ],
+                    "path": [
+                        "api",
+                        "settlement_health"
+                    ]
+                },
+                "description": "Check the health status of the settlement system.\n\n**Returns:**\n- `status`: \"healthy\", \"degraded\", or \"unhealthy\"\n- `message`: Description of the current status\n- `web3_connected`: Boolean indicating Web3 connection status\n- `contract_address`: The settlement contract address"
+            },
+            "response": []
+        }
+    ]
+}

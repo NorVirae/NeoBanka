@@ -1,0 +1,114 @@
+{
+  "info": {
+    "name": "Orderbook - register_order",
+    "description": "Postman collection to test the orderbook /api/register_order endpoint. Update the environment variable {{baseUrl}} to match your running server (default http://localhost:8001).",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    {
+      "key": "baseUrl",
+      "value": "http://localhost:8001",
+      "type": "string"
+    }
+  ],
+  "item": [
+    {
+      "name": "Register order (form payload) - unsigned/demo signature",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/x-www-form-urlencoded"
+          }
+        ],
+        "body": {
+          "mode": "urlencoded",
+          "urlencoded": [
+            {
+              "key": "payload",
+              "value": "{\"account\": \"0x877664Ae1f1ca217977562A04592eCbCADb2Ca58\", \"baseAsset\": \"HBAR\", \"quoteAsset\": \"USDT\", \"price\": \"0.01\", \"quantity\": \"0.1\", \"side\": \"ask\", \"privateKey\": \"0xYOUR_PRIVATE_KEY_HERE\", \"from_network\": \"hedera\", \"to_network\": \"polygon\", \"receive_wallet\": \"0xRECEIVE_WALLET_ON_DEST\"}",
+              "type": "text"
+            }
+          ]
+        },
+        "url": {
+          "raw": "{{baseUrl}}/api/register_order",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "api",
+            "register_order"
+          ]
+        }
+      },
+      "response": []
+    },
+    {
+      "name": "Register order (raw JSON) - client-signed example",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"account\": \"0x877664Ae1f1ca217977562A04592eCbCADb2Ca58\",\n  \"baseAsset\": \"HBAR\",\n  \"quoteAsset\": \"USDT\",\n  \"price\": \"0.01\",\n  \"quantity\": \"0.1\",\n  \"side\": \"ask\",\n  \"privateKey\": \"0xYOUR_PRIVATE_KEY_HERE\",\n  \"from_network\": \"hedera\",\n  \"to_network\": \"polygon\",\n  \"receive_wallet\": \"0xRECEIVE_WALLET_ON_DEST\",\n  \"signature1\": \"0xSIGNATURE_HEX_FOR_PARTY1\",\n  \"signature2\": \"0xSIGNATURE_HEX_FOR_PARTY2\"\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        },
+        "url": {
+          "raw": "{{baseUrl}}/api/register_order",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "api",
+            "register_order"
+          ]
+        }
+      },
+      "response": []
+    },
+    {
+      "name": "Register order (form payload) - with signature embedded in party array",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/x-www-form-urlencoded"
+          }
+        ],
+        "body": {
+          "mode": "urlencoded",
+          "urlencoded": [
+            {
+              "key": "payload",
+              "value": "{\"account\": \"0x877664Ae1f1ca217977562A04592eCbCADb2Ca58\", \"baseAsset\": \"HBAR\", \"quoteAsset\": \"USDT\", \"price\": \"0.01\", \"quantity\": \"0.1\", \"side\": \"ask\", \"privateKey\": \"0xYOUR_PRIVATE_KEY_HERE\", \"from_network\": \"hedera\", \"to_network\": \"polygon\", \"receive_wallet\": \"0xRECEIVE_WALLET_ON_DEST\", \"party_signatures\": [\"0xSIGNATURE_FOR_PARTY1\", \"0xSIGNATURE_FOR_PARTY2\"]}",
+              "type": "text"
+            }
+          ]
+        },
+        "url": {
+          "raw": "{{baseUrl}}/api/register_order",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "api",
+            "register_order"
+          ]
+        }
+      },
+      "response": []
+    }
+  ]
+}

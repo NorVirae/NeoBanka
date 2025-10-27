@@ -1,0 +1,329 @@
+{
+  "info": {
+    "name": "Cross-Chain Settlement API",
+    "description": "API collection for testing cross-chain trade settlement with escrow management",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    {
+      "key": "base_url",
+      "value": "http://localhost:8000",
+      "type": "string"
+    },
+    {
+      "key": "settlement_contract",
+      "value": "0x1234567890123456789012345678901234567890",
+      "type": "string"
+    },
+    {
+      "key": "user_address",
+      "value": "0xYourUserAddress",
+      "type": "string"
+    },
+    {
+      "key": "private_key",
+      "value": "0xYourPrivateKey",
+      "type": "string"
+    },
+    {
+      "key": "hbar_token",
+      "value": "0xHBARTokenAddress",
+      "type": "string"
+    },
+    {
+      "key": "usdt_token",
+      "value": "0xUSDTTokenAddress",
+      "type": "string"
+    }
+  ],
+  "item": [
+    {
+      "name": "1. Health Check",
+      "item": [
+        {
+          "name": "Settlement Health",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/settlement/health",
+              "host": ["{{base_url}}"],
+              "path": ["settlement", "health"]
+            },
+            "description": "Check if the settlement system is operational"
+          }
+        },
+        {
+          "name": "Get Settlement Address",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/settlement/address",
+              "host": ["{{base_url}}"],
+              "path": ["settlement", "address"]
+            },
+            "description": "Get the settlement contract address"
+          }
+        }
+      ]
+    },
+    {
+      "name": "2. Escrow Management",
+      "item": [
+        {
+          "name": "Check Escrow Balance",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"userAddress\": \"{{user_address}}\",\n  \"tokenAddress\": \"{{hbar_token}}\",\n  \"decimals\": 18\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/escrow/balance",
+              "host": ["{{base_url}}"],
+              "path": ["escrow", "balance"]
+            },
+            "description": "Check user's escrow balance for a specific token"
+          }
+        },
+        {
+          "name": "Deposit to Escrow",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"tokenAddress\": \"{{hbar_token}}\",\n  \"amount\": 100,\n  \"decimals\": 18\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/escrow/deposit",
+              "host": ["{{base_url}}"],
+              "path": ["escrow", "deposit"]
+            },
+            "description": "Deposit tokens to escrow (requires prior token approval)"
+          }
+        },
+        {
+          "name": "Withdraw from Escrow",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"tokenAddress\": \"{{hbar_token}}\",\n  \"amount\": 50,\n  \"decimals\": 18\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/escrow/withdraw",
+              "host": ["{{base_url}}"],
+              "path": ["escrow", "withdraw"]
+            },
+            "description": "Withdraw available (unlocked) tokens from escrow"
+          }
+        }
+      ]
+    },
+    {
+      "name": "3. Order Management",
+      "item": [
+        {
+          "name": "Register Ask Order (Sell HBAR)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"account\": \"{{user_address}}\",\n  \"privateKey\": \"{{private_key}}\",\n  \"price\": 0.05,\n  \"quantity\": 100,\n  \"side\": \"ask\",\n  \"type\": \"limit\",\n  \"baseAsset\": \"HBAR\",\n  \"quoteAsset\": \"USDT\",\n  \"from_network\": \"hedera_testnet\",\n  \"to_network\": \"ethereum_sepolia\",\n  \"receive_wallet\": \"{{user_address}}\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/order/register",
+              "host": ["{{base_url}}"],
+              "path": ["order", "register"]
+            },
+            "description": "Register a sell order (ask) - User must have 100 HBAR in escrow on source chain"
+          }
+        },
+        {
+          "name": "Register Bid Order (Buy HBAR)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"account\": \"0xBuyerAddress\",\n  \"privateKey\": \"0xBuyerPrivateKey\",\n  \"price\": 0.05,\n  \"quantity\": 100,\n  \"side\": \"bid\",\n  \"type\": \"limit\",\n  \"baseAsset\": \"HBAR\",\n  \"quoteAsset\": \"USDT\",\n  \"from_network\": \"ethereum_sepolia\",\n  \"to_network\": \"hedera_testnet\",\n  \"receive_wallet\": \"0xBuyerAddress\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/order/register",
+              "host": ["{{base_url}}"],
+              "path": ["order", "register"]
+            },
+            "description": "Register a buy order (bid) - User must have 5 USDT (100 * 0.05) in escrow on source chain"
+          }
+        },
+        {
+          "name": "Cancel Order",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"orderId\": 1,\n  \"side\": \"ask\",\n  \"baseAsset\": \"HBAR\",\n  \"quoteAsset\": \"USDT\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/order/cancel",
+              "host": ["{{base_url}}"],
+              "path": ["order", "cancel"]
+            },
+            "description": "Cancel an existing order"
+          }
+        },
+        {
+          "name": "Get Order",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"orderId\": 1\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/order/get",
+              "host": ["{{base_url}}"],
+              "path": ["order", "get"]
+            },
+            "description": "Get order details by ID"
+          }
+        },
+        {
+          "name": "Get Order Book",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"symbol\": \"HBAR_USDT\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/orderbook",
+              "host": ["{{base_url}}"],
+              "path": ["orderbook"]
+            },
+            "description": "Get the full order book for a trading pair"
+          }
+        },
+        {
+          "name": "Check Available Funds",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"account\": \"{{user_address}}\",\n  \"asset\": \"HBAR\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/funds/check",
+              "host": ["{{base_url}}"],
+              "path": ["funds", "check"]
+            },
+            "description": "Check locked funds across all order books"
+          }
+        }
+      ]
+    },
+    {
+      "name": "4. Cross-Chain Trade Examples",
+      "item": [
+        {
+          "name": "Complete Cross-Chain Trade (Seller First)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"account\": \"0xSellerAddress\",\n  \"privateKey\": \"0xSellerPrivateKey\",\n  \"price\": 0.05,\n  \"quantity\": 100,\n  \"side\": \"ask\",\n  \"type\": \"limit\",\n  \"baseAsset\": \"HBAR\",\n  \"quoteAsset\": \"USDT\",\n  \"from_network\": \"hedera_testnet\",\n  \"to_network\": \"ethereum_sepolia\",\n  \"receive_wallet\": \"0xSellerReceiveAddress\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/order/register",
+              "host": ["{{base_url}}"],
+              "path": ["order", "register"]
+            },
+            "description": "Step 1: Seller places ask order. Waits in order book."
+          }
+        },
+        {
+          "name": "Complete Cross-Chain Trade (Buyer Match)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"account\": \"0xBuyerAddress\",\n  \"privateKey\": \"0xBuyerPrivateKey\",\n  \"price\": 0.05,\n  \"quantity\": 100,\n  \"side\": \"bid\",\n  \"type\": \"limit\",\n  \"baseAsset\": \"HBAR\",\n  \"quoteAsset\": \"USDT\",\n  \"from_network\": \"ethereum_sepolia\",\n  \"to_network\": \"hedera_testnet\",\n  \"receive_wallet\": \"0xBuyerReceiveAddress\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/order/register",
+              "host": ["{{base_url}}"],
+              "path": ["order", "register"]
+            },
+            "description": "Step 2: Buyer places matching bid. Trade executes and settles on both chains automatically."
+          }
+        }
+      ]
+    }
+  ]
+}

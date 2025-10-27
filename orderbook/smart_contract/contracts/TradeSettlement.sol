@@ -1,0 +1,478 @@
+// SPDX-License-Identifier: MIT
+pragma solidity ^0.8.28;
+
+import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+import "@openzeppelin/contracts/utils/cryptography/ECDSA.sol";
+import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
+import "@openzeppelin/contracts/access/Ownable.sol";
+import "@openzeppelin/contracts/utils/cryptography/MessageHashUtils.sol";
+// import "hardhat/console.sol";
+
+contract TradeSettlement is ReentrancyGuard, Ownable {
+    using ECDSA for bytes32;
+    using MessageHashUtils for bytes32;
+
+    struct CrossChainTradeData {
+        bytes32 orderId;
+        address party1;                 // Trader on source chain
+        address party2;                 // Trader on destination chain
+        address party1ReceiveWallet;    // Where party1 receives on destination chain
+        address party2ReceiveWallet;    // Where party2 receives on source chain
+        address baseAsset;              // Base asset address (on respective chains)
+        address quoteAsset;             // Quote asset address (on respective chains)
+        uint256 price;                  // Price in quote asset per base asset (18 decimals)
+        uint256 quantity;               // Quantity of base asset
+        string party1Side;              // "bid" or "ask"
+        string party2Side;              // "ask" or "bid" (opposite of party1)
+        uint256 sourceChainId;          // ChainA
+        uint256 destinationChainId;     // ChainB
+        uint256 timestamp;
+        uint256 nonce1;
+        uint256 nonce2;
+    }
+
+    // Escrow mappings
+    mapping(address => mapping(address => uint256)) public escrowBalances;
+    mapping(address => mapping(address => uint256)) public lockedBalances;
+    mapping(bytes32 => bool) public orderLocks;
+
+    // Cross-chain mappings
+    mapping(bytes32 => bool) public settledCrossChainOrders;
+    mapping(address => mapping(address => uint256)) public nonces;
+    mapping(bytes32 => bool) public executedTrades;
+
+    // Events
+    event EscrowDepositEvent(
+        address indexed user,
+        address indexed token,
+        uint256 amount,
+        uint256 timestamp
+    );
+
+    event EscrowWithdraw(
+        address indexed user,
+        address indexed token,
+        uint256 amount,
+        uint256 timestamp
+    );
+
+    event EscrowLocked(
+        address indexed user,
+        address indexed token,
+        uint256 amount,
+        bytes32 indexed orderId
+    );
+
+    event CrossChainTradeSettled(
+        bytes32 indexed orderId,
+        address indexed sender,
+        address indexed receiver,
+        address assetSent,
+        uint256 amountSent,
+        uint256 chainId,
+        bool isSourceChain,
+        uint256 timestamp
+    );
+
+    constructor() Ownable(msg.sender) {}
+
+    /**
+     * @dev Deposit tokens into escrow
+     */
+    function depositToEscrow(
+        address token,
+        uint256 amount
+    ) external nonReentrant {
+        require(amount > 0, "Amount must be greater than 0");
+
+        IERC20 tokenContract = IERC20(token);
+        require(
+            tokenContract.transferFrom(msg.sender, address(this), amount),
+            "Transfer failed"
+        );
+
+        escrowBalances[msg.sender][token] += amount;
+
+        emit EscrowDepositEvent(msg.sender, token, amount, block.timestamp);
+    }
+
+    /**
+     * @dev Withdraw tokens from escrow (only unlocked amount)
+     */
+    function withdrawFromEscrow(
+        address token,
+        uint256 amount
+    ) external nonReentrant {
+        uint256 availableBalance = escrowBalances[msg.sender][token] -
+            lockedBalances[msg.sender][token];
+
+        require(amount > 0, "Amount must be greater than 0");
+        require(availableBalance >= amount, "Insufficient available balance");
+
+        escrowBalances[msg.sender][token] -= amount;
+
+        IERC20 tokenContract = IERC20(token);
+        require(tokenContract.transfer(msg.sender, amount), "Transfer failed");
+
+        emit EscrowWithdraw(msg.sender, token, amount, block.timestamp);
+    }
+
+    /**
+     * @dev Lock escrow funds for an order
+     */
+    function lockEscrowForOrder(
+        address user,
+        address token,
+        uint256 amount,
+        bytes32 orderId
+    ) external onlyOwner {
+        require(!orderLocks[orderId], "Order already locked");
+
+        uint256 availableBalance = escrowBalances[user][token] -
+            lockedBalances[user][token];
+
+        require(availableBalance >= amount, "Insufficient escrow balance");
+
+        lockedBalances[user][token] += amount;
+        orderLocks[orderId] = true;
+
+        emit EscrowLocked(user, token, amount, orderId);
+    }
+
+    /**
+     * @dev Verify cross-chain trade signature
+     */
+    function verifyCrossChainTradeSignature(
+        address signer,
+        bytes32 orderId,
+        address baseAsset,
+        address quoteAsset,
+        uint256 price,
+        uint256 quantity,
+        string memory side,
+        address receiveWallet,
+        uint256 sourceChainId,
+        uint256 destinationChainId,
+        uint256 timestamp,
+        uint256 nonce,
+        bytes memory signature
+    ) public pure returns (bool) {
+        bytes32 messageHash = keccak256(
+            abi.encodePacked(
+                orderId,
+                baseAsset,
+                quoteAsset,
+                price,
+                quantity,
+                side,
+                receiveWallet,
+                sourceChainId,
+                destinationChainId,
+                timestamp,
+                nonce
+            )
+        );
+
+        bytes32 ethSignedMessageHash = messageHash.toEthSignedMessageHash();
+        address recovered = ethSignedMessageHash.recover(signature);
+
+        return recovered == signer;
+    }
+
+    /**
+     * @dev Settle cross-chain trade - P2P atomic swap without bridge
+     * 
+     * Example: TraderA (ChainA - ask/sell HBAR) <-> TraderB (ChainB - bid/buy HBAR with USDT)
+     * 
+     * ON CHAIN A (Source Chain):
+     * - TraderA (party1) sends HBAR from escrow → TraderB's receiving wallet (party2ReceiveWallet)
+     * 
+     * ON CHAIN B (Destination Chain):
+     * - TraderB (party2) sends USDT from escrow → TraderA's receiving wallet (party1ReceiveWallet)
+     * 
+     * Both settlements must succeed for atomic swap completion
+     */
+    function settleCrossChainTrade(
+        CrossChainTradeData memory tradeData,
+        bytes memory signature1,
+        bytes memory signature2,
+        bytes memory matchingEngineSignature,
+        bool isSourceChain
+    ) external nonReentrant onlyOwner {
+        // Prevent replay attacks
+        require(
+            !settledCrossChainOrders[tradeData.orderId],
+            "Order already settled on this chain"
+        );
+        
+        // Verify we're on the correct chain
+        if (isSourceChain) {
+            // console.log(block.chainid);
+            // console.log(tradeData.sourceChainId);
+            // console.log(tradeData.destinationChainId);
+            // console.log("=======");
+
+            require(block.chainid == tradeData.sourceChainId, "Not source chain");
+        } else {
+            require(block.chainid == tradeData.destinationChainId, "Not destination chain");
+        }
+
+        // Validate receive wallets
+        require(tradeData.party1ReceiveWallet != address(0), "Invalid party1 receive wallet");
+        require(tradeData.party2ReceiveWallet != address(0), "Invalid party2 receive wallet");
+
+        // Validate opposite sides
+        bool validSides = (
+            keccak256(abi.encodePacked(tradeData.party1Side)) == keccak256(abi.encodePacked("ask")) &&
+            keccak256(abi.encodePacked(tradeData.party2Side)) == keccak256(abi.encodePacked("bid"))
+        ) || (
+            keccak256(abi.encodePacked(tradeData.party1Side)) == keccak256(abi.encodePacked("bid")) &&
+            keccak256(abi.encodePacked(tradeData.party2Side)) == keccak256(abi.encodePacked("ask"))
+        );
+        require(validSides, "Parties must be on opposite sides");
+
+        // Create unique trade hash
+        bytes32 tradeHash = keccak256(
+            abi.encodePacked(
+                tradeData.orderId,
+                tradeData.party1,
+                tradeData.party2,
+                tradeData.baseAsset,
+                tradeData.quoteAsset,
+                tradeData.price,
+                tradeData.quantity,
+                tradeData.sourceChainId,
+                tradeData.destinationChainId,
+                tradeData.timestamp
+            )
+        );
+
+        require(!executedTrades[tradeHash], "Trade already executed");
+        executedTrades[tradeHash] = true;
+
+        // Verify party1 signature
+        require(
+            verifyCrossChainTradeSignature(
+                tradeData.party1,
+                tradeData.orderId,
+                tradeData.baseAsset,
+                tradeData.quoteAsset,
+                tradeData.price,
+                tradeData.quantity,
+                tradeData.party1Side,
+                tradeData.party1ReceiveWallet,
+                tradeData.sourceChainId,
+                tradeData.destinationChainId,
+                tradeData.timestamp,
+                tradeData.nonce1,
+                signature1
+            ),
+            "Invalid party1 signature"
+        );
+
+        // Verify party2 signature
+        require(
+            verifyCrossChainTradeSignature(
+                tradeData.party2,
+                tradeData.orderId,
+                tradeData.baseAsset,
+                tradeData.quoteAsset,
+                tradeData.price,
+                tradeData.quantity,
+                tradeData.party2Side,
+                tradeData.party2ReceiveWallet,
+                tradeData.sourceChainId,
+                tradeData.destinationChainId,
+                tradeData.timestamp,
+                tradeData.nonce2,
+                signature2
+            ),
+            "Invalid party2 signature"
+        );
+
+        // Verify matching engine signature
+        bytes32 matchingEngineHash = keccak256(
+            abi.encodePacked(
+                tradeData.orderId,
+                tradeData.party1,
+                tradeData.party2,
+                tradeData.party1ReceiveWallet,
+                tradeData.party2ReceiveWallet,
+                tradeData.baseAsset,
+                tradeData.quoteAsset,
+                tradeData.price,
+                tradeData.quantity,
+                isSourceChain,
+                block.chainid
+            )
+        );
+
+        bytes32 ethSignedHash = matchingEngineHash.toEthSignedMessageHash();
+        address recovered = ethSignedHash.recover(matchingEngineSignature);
+        require(recovered == owner(), "Invalid matching engine signature");
+
+        // Mark as settled
+        settledCrossChainOrders[tradeData.orderId] = true;
+
+        // Calculate amounts
+        uint256 baseAmount = tradeData.quantity;
+        uint256 quoteAmount = (tradeData.quantity * tradeData.price) / 1e18;
+
+        // Execute settlement based on which chain we're on
+        if (isSourceChain) {
+            _settleSourceChain(tradeData, baseAmount, quoteAmount);
+        } else {
+            _settleDestinationChain(tradeData, baseAmount, quoteAmount);
+        }
+
+        // Update nonces
+        nonces[tradeData.party1][tradeData.baseAsset] = tradeData.nonce1 + 1;
+        nonces[tradeData.party2][tradeData.baseAsset] = tradeData.nonce2 + 1;
+    }
+
+    /**
+     * @dev Handle settlement on source chain (ChainA)
+     * 
+     * On source chain, we transfer the BASE asset:
+     * - If party1 is "ask" (selling base): party1 sends base → party2ReceiveWallet
+     * - If party1 is "bid" (buying base): party2 sends base → party1ReceiveWallet
+     * 
+     * Note: party2 is not on this chain, so party2ReceiveWallet is their designated wallet on ChainA
+     */
+    function _settleSourceChain(
+        CrossChainTradeData memory tradeData,
+        uint256 baseAmount,
+        uint256 quoteAmount
+    ) internal {
+        address sender;
+        address receiver;
+        uint256 amount;
+        
+        // Determine who sends base asset on source chain
+        if (keccak256(abi.encodePacked(tradeData.party1Side)) == keccak256(abi.encodePacked("ask"))) {
+            // Party1 is selling base (ask side)
+            // Party1 sends base → Party2's receive wallet on this chain
+            sender = tradeData.party1;
+            receiver = tradeData.party2ReceiveWallet;
+            amount = baseAmount;
+        } else {
+            // Party1 is buying base (bid side)
+            // Party2 sends base → Party1's wallet (party1 is already on this chain)
+            // BUT party2 is on destination chain, so this shouldn't happen on source chain
+            // In this case, party2ReceiveWallet should have the base to receive
+            revert("Invalid configuration: party2 cannot send from source chain");
+        }
+
+        // Verify locked balance
+        require(
+            lockedBalances[sender][tradeData.baseAsset] >= amount,
+            "Insufficient locked base balance on source chain"
+        );
+
+        // Deduct from sender's locked escrow
+        lockedBalances[sender][tradeData.baseAsset] -= amount;
+        escrowBalances[sender][tradeData.baseAsset] -= amount;
+
+        // Transfer base asset to receiver's wallet
+        IERC20 baseToken = IERC20(tradeData.baseAsset);
+        require(
+            baseToken.transfer(receiver, amount),
+            "Base asset transfer failed on source chain"
+        );
+
+        emit CrossChainTradeSettled(
+            tradeData.orderId,
+            sender,
+            receiver,
+            tradeData.baseAsset,
+            amount,
+            tradeData.sourceChainId,
+            true,
+            block.timestamp
+        );
+    }
+
+    /**
+     * @dev Handle settlement on destination chain (ChainB)
+     * 
+     * On destination chain, we transfer the QUOTE asset:
+     * - If party2 is "bid" (buying base with quote): party2 sends quote → party1ReceiveWallet
+     * - If party2 is "ask" (selling base for quote): party1 sends quote → party2ReceiveWallet
+     * 
+     * Note: party1 is not on this chain, so party1ReceiveWallet is their designated wallet on ChainB
+     */
+    function _settleDestinationChain(
+        CrossChainTradeData memory tradeData,
+        uint256 baseAmount,
+        uint256 quoteAmount
+    ) internal {
+        address sender;
+        address receiver;
+        uint256 amount;
+        
+        // Determine who sends quote asset on destination chain
+        if (keccak256(abi.encodePacked(tradeData.party2Side)) == keccak256(abi.encodePacked("bid"))) {
+            // Party2 is buying base with quote (bid side)
+            // Party2 sends quote → Party1's receive wallet on this chain
+            sender = tradeData.party2;
+            receiver = tradeData.party1ReceiveWallet;
+            amount = quoteAmount;
+        } else {
+            // Party2 is selling base for quote (ask side)
+            // Party1 sends quote → Party2's wallet (party2 is already on this chain)
+            // BUT party1 is on source chain, so this shouldn't happen on destination chain
+            revert("Invalid configuration: party1 cannot send from destination chain");
+        }
+
+        // Verify locked balance
+        require(
+            lockedBalances[sender][tradeData.quoteAsset] >= amount,
+            "Insufficient locked quote balance on destination chain"
+        );
+
+        // Deduct from sender's locked escrow
+        lockedBalances[sender][tradeData.quoteAsset] -= amount;
+        escrowBalances[sender][tradeData.quoteAsset] -= amount;
+
+        // Transfer quote asset to receiver's wallet
+        IERC20 quoteToken = IERC20(tradeData.quoteAsset);
+        require(
+            quoteToken.transfer(receiver, amount),
+            "Quote asset transfer failed on destination chain"
+        );
+
+        emit CrossChainTradeSettled(
+            tradeData.orderId,
+            sender,
+            receiver,
+            tradeData.quoteAsset,
+            amount,
+            tradeData.destinationChainId,
+            false,
+            block.timestamp
+        );
+    }
+
+    /**
+     * @dev Get user nonce for a specific token
+     */
+    function getUserNonce(
+        address user,
+        address token
+    ) external view returns (uint256) {
+        return nonces[user][token];
+    }
+
+    /**
+     * @dev Check escrow balance (total and available)
+     */
+    function checkEscrowBalance(
+        address user,
+        address token
+    ) public view returns (uint256 total, uint256 available, uint256 locked) {
+        total = escrowBalances[user][token];
+        locked = lockedBalances[user][token];
+        available = total - locked;
+        return (total, available, locked);
+    }
+}
