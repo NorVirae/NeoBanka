@@ -1,4 +1,4 @@
-# HyperFill Market Maker Bot
+# NeoBank Market Maker Bot
 
 ```
 ██╗  ██╗██╗   ██╗██████╗ ███████╗██████╗ ███████╗██╗██╗     ██╗     
@@ -14,7 +14,7 @@
 
 
 ## TL, DR
-Automated market making bot for the HyperFill DEX protocol on Hedera. Built with Python/FastAPI, it gives liquidity through bid/ask order management with Gate.io price feeds.
+Automated market making bot for the NeoBank DEX protocol on Hedera. Built with Python/FastAPI, it gives liquidity through bid/ask order management with Gate.io price feeds.
 
 ## Architecture
 
@@ -40,7 +40,7 @@ class MarketMakerBot:
 
 **Methods:**
 - `approve_token_allowance()` - ERC-20 token approvals
-- `place_order()` - Submit orders to HyperFill API
+- `place_order()` - Submit orders to NeoBank API
 - `get_gateio_price()` - External price feed integration
 - `calculate_market_prices()` - Spread-based pricing logic
 - `update_orders()` - 60-second order refresh cycle

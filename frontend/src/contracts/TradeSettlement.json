@@ -1,0 +1,218 @@
+{
+  "abi": [
+    {
+      "inputs": [],
+      "stateMutability": "nonpayable",
+      "type": "constructor"
+    },
+    {
+      "inputs": [
+        {
+          "internalType": "address",
+          "name": "user",
+          "type": "address"
+        },
+        {
+          "internalType": "address",
+          "name": "token",
+          "type": "address"
+        }
+      ],
+      "name": "checkEscrowBalance",
+      "outputs": [
+        {
+          "internalType": "uint256",
+          "name": "total",
+          "type": "uint256"
+        },
+        {
+          "internalType": "uint256",
+          "name": "available",
+          "type": "uint256"
+        },
+        {
+          "internalType": "uint256",
+          "name": "locked",
+          "type": "uint256"
+        }
+      ],
+      "stateMutability": "view",
+      "type": "function"
+    },
+    {
+      "inputs": [
+        {
+          "internalType": "address",
+          "name": "token",
+          "type": "address"
+        },
+        {
+          "internalType": "uint256",
+          "name": "amount",
+          "type": "uint256"
+        }
+      ],
+      "name": "depositToEscrow",
+      "outputs": [],
+      "stateMutability": "nonpayable",
+      "type": "function"
+    },
+    {
+      "inputs": [
+        {
+          "internalType": "address",
+          "name": "user",
+          "type": "address"
+        },
+        {
+          "internalType": "address",
+          "name": "token",
+          "type": "address"
+        }
+      ],
+      "name": "getUserNonce",
+      "outputs": [
+        {
+          "internalType": "uint256",
+          "name": "",
+          "type": "uint256"
+        }
+      ],
+      "stateMutability": "view",
+      "type": "function"
+    },
+    {
+      "inputs": [
+        {
+          "components": [
+            {
+              "internalType": "bytes32",
+              "name": "orderId",
+              "type": "bytes32"
+            },
+            {
+              "internalType": "address",
+              "name": "party1",
+              "type": "address"
+            },
+            {
+              "internalType": "address",
+              "name": "party2",
+              "type": "address"
+            },
+            {
+              "internalType": "address",
+              "name": "party1ReceiveWallet",
+              "type": "address"
+            },
+            {
+              "internalType": "address",
+              "name": "party2ReceiveWallet",
+              "type": "address"
+            },
+            {
+              "internalType": "address",
+              "name": "baseAsset",
+              "type": "address"
+            },
+            {
+              "internalType": "address",
+              "name": "quoteAsset",
+              "type": "address"
+            },
+            {
+              "internalType": "uint256",
+              "name": "price",
+              "type": "uint256"
+            },
+            {
+              "internalType": "uint256",
+              "name": "quantity",
+              "type": "uint256"
+            },
+            {
+              "internalType": "string",
+              "name": "party1Side",
+              "type": "string"
+            },
+            {
+              "internalType": "string",
+              "name": "party2Side",
+              "type": "string"
+            },
+            {
+              "internalType": "uint256",
+              "name": "sourceChainId",
+              "type": "uint256"
+            },
+            {
+              "internalType": "uint256",
+              "name": "destinationChainId",
+              "type": "uint256"
+            },
+            {
+              "internalType": "uint256",
+              "name": "timestamp",
+              "type": "uint256"
+            },
+            {
+              "internalType": "uint256",
+              "name": "nonce1",
+              "type": "uint256"
+            },
+            {
+              "internalType": "uint256",
+              "name": "nonce2",
+              "type": "uint256"
+            }
+          ],
+          "internalType": "struct TradeSettlement.CrossChainTradeData",
+          "name": "tradeData",
+          "type": "tuple"
+        },
+        {
+          "internalType": "bytes",
+          "name": "signature1",
+          "type": "bytes"
+        },
+        {
+          "internalType": "bytes",
+          "name": "signature2",
+          "type": "bytes"
+        },
+        {
+          "internalType": "bytes",
+          "name": "matchingEngineSignature",
+          "type": "bytes"
+        },
+        {
+          "internalType": "bool",
+          "name": "isSourceChain",
+          "type": "bool"
+        }
+      ],
+      "name": "settleCrossChainTrade",
+      "outputs": [],
+      "stateMutability": "nonpayable",
+      "type": "function"
+    },
+    {
+      "inputs": [
+        {
+          "internalType": "address",
+          "name": "token",
+          "type": "address"
+        },
+        {
+          "internalType": "uint256",
+          "name": "amount",
+          "type": "uint256"
+        }
+      ],
+      "name": "withdrawFromEscrow",
+      "outputs": [],
+      "stateMutability": "nonpayable",
+      "type": "function"
+    }
+  ]
+}

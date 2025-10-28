@@ -16,10 +16,10 @@ async function main() {
     // await mockERC20.waitForDeployment();
     // console.log("MockERC20 deployed to:", await mockERC20.getAddress());
 
-    const HyperFillVault = await ethers.getContractFactory("HyperFillVault");
-    const vault = await HyperFillVault.deploy(HBAR_Address);
+    const NeoBankVault = await ethers.getContractFactory("NeoBankVault");
+    const vault = await NeoBankVault.deploy(HBAR_Address);
     await vault.waitForDeployment();
-    console.log("HyperFillVault deployed to:", await vault.getAddress());
+    console.log("NeoBankVault deployed to:", await vault.getAddress());
 }
 
 main().catch((error) => {

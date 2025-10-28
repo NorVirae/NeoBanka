@@ -10,7 +10,7 @@ async function main() {
   // Get signer
   const [user] = await ethers.getSigners();
   
-  // Correct ABIs based on HyperFillVault contract
+  // Correct ABIs based on NeoBankVault contract
   const VAULT_ABI = [
     "function depositLiquidity(uint256 assets) external returns (uint256 shares)",
     "function withdrawProfits() external returns (uint256 assets)",
