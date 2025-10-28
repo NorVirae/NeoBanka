@@ -12,7 +12,7 @@
 
 
 
-# HyperFill Market Making API
+# NeoBank Market Making API
 
 ## TL,DR
 We've built an order book engine with on-chain settlement for decentralized market making for the HBAR Hackathon when Filament API shut down. Built with Python/FastAPI, has live order matching, Web3 integration and automated trade settlement with cryptographic validation.
@@ -20,7 +20,7 @@ We've built an order book engine with on-chain settlement for decentralized mark
 ## Architecture
 
 ```python
-hyperfill-market-making-api/
+NeoBank-market-making-api/
 ├── main.py                          # FastAPI server & endpoint handlers (837 LOC)
 ├── orderbook/                       # Core order book engine
 │   ├── __init__.py

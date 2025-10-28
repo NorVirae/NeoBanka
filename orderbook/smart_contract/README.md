@@ -1,4 +1,4 @@
-# HyperFill Vault Smart Contracts
+# NeoBank Vault Smart Contracts
 
 ```
 ██╗  ██╗██╗   ██╗██████╗ ███████╗██████╗ ███████╗██╗██╗     ██╗     
@@ -16,11 +16,11 @@
 
 ## Overview
 
-HyperFill Vault is a core smart contract system deployed on Hedera Network connected with autonomous financial agents. The system has two main contracts: a liquidity vault for user deposits and a trade settlement contract for multi party trading.
+NeoBank Vault is a core smart contract system deployed on Hedera Network connected with autonomous financial agents. The system has two main contracts: a liquidity vault for user deposits and a trade settlement contract for multi party trading.
 
 ## Smart Contract Architecture
 
-### HyperFillVault.sol
+### NeoBankVault.sol
 An ERC4626-compliant vault that manages user liquidity and AI agent capital allocation.
 
 **Features:**
@@ -56,7 +56,7 @@ function batchCheckAllowances(...) external view returns (bool[], uint256[])
 
 ##  Technical Specifications
 
-### HyperFillVault
+### NeoBankVault
 
 **Inheritance:**
 - `ERC4626` (OpenZeppelin) - Standard vault interface
@@ -118,7 +118,7 @@ HEDERA_RPC_URL=https://testnet.hashio.io/api
 
 ### Deploy to Hedera Testnet
 ```bash
-# Deploy HyperFillVault
+# Deploy NeoBankVault
 npx hardhat run scripts/deploy.ts --network testnet
 
 # Deploy TradeSettlement
@@ -163,7 +163,7 @@ npx hardhat run scripts/testFile/testSettlement.ts --network testnet
 ##  Contract Addresses (Hedera Testnet)
 
 ```
-HyperFillVault: [To be deployed]
+NeoBankVault: [To be deployed]
 TradeSettlement: [To be deployed]
 HBAR Token: [Native token]
 ```

@@ -60,6 +60,9 @@ class APIService:
         TRADE_SETTLEMENT_CONTRACT_ADDRESS=None,
         CONTRACT_ABI=None,
         PRIVATE_KEY=None,
+        activity_log=None,
+        activity_file_path: str | None = None,
+        append_file=None,
     ):
         logger.info("GOT HERE")
         try:
@@ -193,6 +196,25 @@ class APIService:
                 "timestamp": order["timestamp"],
             }
 
+            # Log placement to in-memory and file
+            try:
+                placement = {
+                    "type": "order_placed",
+                    "symbol": symbol,
+                    "orderId": order_dict["orderId"],
+                    "account": order_dict["account"],
+                    "side": order_dict["side"],
+                    "price": order_dict["price"],
+                    "quantity": order_dict["quantity"],
+                    "timestamp": order_dict["timestamp"],
+                }
+                if activity_log is not None:
+                    activity_log.append(placement)
+                if append_file is not None:
+                    append_file(placement)
+            except Exception:
+                pass
+
             next_best_order_dict = None
             if next_best_order is not None:
                 next_best_order_dict = {
@@ -226,6 +248,23 @@ class APIService:
                 )
                 logger.info(f"Settlement result: {settlement_info}")
 
+                # Persist trades
+                try:
+                    for tr in converted_trades:
+                        rec = {
+                            "type": "trade_executed",
+                            "symbol": symbol,
+                            "price": float(tr["price"]),
+                            "quantity": float(tr["quantity"]),
+                            "timestamp": int(tr["timestamp"]),
+                        }
+                        if activity_log is not None:
+                            activity_log.append(rec)
+                        if append_file is not None:
+                            append_file(rec)
+                except Exception:
+                    pass
+
             logger.info(
                 f"Order processed successfully with {len(converted_trades)} trades"
             )
@@ -247,7 +286,7 @@ class APIService:
             logger.error(f"Error in register_order: {e}")
             raise HTTPException(status_code=500, detail=str(e))
 
-    async def cancel_order(self, request: Request, order_books):
+    async def cancel_order(self, request: Request, order_books, activity_log=None, activity_file_path: str | None = None, append_file=None):
         try:
             payload_json = await APIHelper.handlePayloadJson(request)
             order_id = payload_json["orderId"]
@@ -276,6 +315,22 @@ class APIService:
                 "isValid": False,
                 "timestamp": order.timestamp,
             }
+
+            # Log cancellation
+            try:
+                cancel_rec = {
+                    "type": "order_cancelled",
+                    "symbol": symbol,
+                    "orderId": int(order_id),
+                    "side": side,
+                    "timestamp": order.timestamp,
+                }
+                if activity_log is not None:
+                    activity_log.append(cancel_rec)
+                if append_file is not None:
+                    append_file(cancel_rec)
+            except Exception:
+                pass
 
             return JSONResponse(
                 content={
@@ -357,6 +412,46 @@ class APIService:
                 content={
                     "message": "Order book retrieved successfully",
                     "orderbook": result,
+                    "status_code": 1,
+                }
+            )
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=str(e))
+
+    async def get_trades(self, request: Request, order_books):
+        try:
+            payload_json = await APIHelper.handlePayloadJson(request)
+
+            symbol = payload_json["symbol"]
+            limit = int(payload_json.get("limit", 200))
+
+            if symbol not in order_books:
+                order_book = OrderBook()
+                order_books[symbol] = order_book
+            else:
+                order_book = order_books[symbol]
+
+            # Convert tape (trade history) to serializable list
+            trades_list = [
+                {
+                    "timestamp": int(trade.get("timestamp", 0)),
+                    "time": int(trade.get("time", 0)),
+                    "price": float(trade.get("price", 0)),
+                    "quantity": float(trade.get("quantity", 0)),
+                }
+                for trade in list(order_book.tape)
+            ]
+
+            # Sort by time ascending and trim to last N
+            trades_list.sort(key=lambda t: t.get("time", t.get("timestamp", 0)))
+            if limit > 0:
+                trades_list = trades_list[-limit:]
+
+            return JSONResponse(
+                content={
+                    "message": "Trades retrieved successfully",
+                    "symbol": symbol,
+                    "trades": trades_list,
                     "status_code": 1,
                 }
             )
