@@ -65,13 +65,26 @@ SUPPORTED_NETWORKS = {
         "contract_address": os.getenv(
             "TRADE_SETTLE_CONTRACT_ADDRESS_HEDERA", TRADE_SETTLEMENT_CONTRACT_ADDRESS
         ),
+        "tokens": {
+            "HBAR": os.getenv(
+                "HEDERA_HBAR_TOKEN_ADDRESS", os.getenv("HBAR_TOKEN_ADDRESS", "0xA219e375D1F84A50273c93FaaF5EACD285bD9990")
+            ),
+            "USDT": os.getenv(
+                "HEDERA_USDT_TOKEN_ADDRESS", os.getenv("USDT_TOKEN_ADDRESS", "0x62bcF51859E23cc47ddc6C3144B045619476Be92")
+            ),
+        },
     },
     "polygon": {
-        "rpc": os.getenv("WEB3_PROVIDER_POLYGON", "https://your-ethereum-node.com"),
-        "chain_id": int(os.getenv("WEB3_CHAIN_ID_POLYGON", "0")),
+        "rpc": os.getenv("WEB3_PROVIDER_POLYGON", "https://polygon-rpc.com"),
+        "chain_id": int(os.getenv("WEB3_CHAIN_ID_POLYGON", "137")),
         "contract_address": os.getenv(
             "TRADE_SETTLE_CONTRACT_ADDRESS_POLYGON", TRADE_SETTLEMENT_CONTRACT_ADDRESS
         ),
+        "tokens": {
+            # Defaults can be Amoy or your own deployments; override in env for mainnet/testnet
+            "HBAR": os.getenv("POLYGON_HBAR_TOKEN_ADDRESS", "0x41086d277f8A183A351310eC89d1AA9Dc1e67B7B"),
+            "USDT": os.getenv("POLYGON_USDT_TOKEN_ADDRESS", "0x750702AA1dE631277576602b780A38790c36E19e"),
+        },
     },
 }
 
@@ -112,15 +125,10 @@ try:
 except Exception:
     CONTRACT_ABI = []  # fallback
 
-# Token address mapping - you should expand this
+# Legacy token mapping (kept for compatibility); prefer SUPPORTED_NETWORKS[net]["tokens"]
 TOKEN_ADDRESSES = {
-    # Align defaults with frontend/contracts.ts (Hedera Testnet deploys)
-    "HBAR": os.getenv(
-        "HBAR_TOKEN_ADDRESS", "0xA219e375D1F84A50273c93FaaF5EACD285bD9990"
-    ),
-    "USDT": os.getenv(
-        "USDT_TOKEN_ADDRESS", "0x62bcF51859E23cc47ddc6C3144B045619476Be92"
-    ),
+    "HBAR": os.getenv("HBAR_TOKEN_ADDRESS", SUPPORTED_NETWORKS["hedera"]["tokens"]["HBAR"]),
+    "USDT": os.getenv("USDT_TOKEN_ADDRESS", SUPPORTED_NETWORKS["hedera"]["tokens"]["USDT"]),
 }
 
 

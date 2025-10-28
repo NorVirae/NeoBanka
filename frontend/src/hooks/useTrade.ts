@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { ethers } from 'ethers';
 import { useWallet } from './useWallet';
 import { orderbookApi, OrderData } from '../lib/api';
-import { ERC20_ABI, SETTLEMENT_ABI, CONTRACTS, TOKEN_DECIMALS, HEDERA_TESTNET } from '../lib/contracts';
+import { ERC20_ABI, SETTLEMENT_ABI, TOKEN_DECIMALS, HEDERA_TESTNET, CHAIN_REGISTRY, resolveTokenAddress, resolveSettlementAddress } from '../lib/contracts';
 
 interface TradeState {
   loading: boolean;
@@ -47,12 +47,20 @@ export function useTrade() {
   });
 
   const { provider, account, signer } = useWallet();
-  const settlementAddress = CONTRACTS.SETTLEMENT_ADDRESS;
+  // Read-only fallback provider to bypass wallet RPC throttling / circuit breaker
+  const readonlyProvider = new ethers.JsonRpcProvider(HEDERA_TESTNET.rpcUrls[0]);
   
   // Ensure wallet has enough HBAR for gas
   const ensureSufficientHbar = async (minimumHbar: string = '0.001') => {
-    if (!provider || !account) throw new Error('Wallet not connected');
-    const balance = await provider.getBalance(account);
+    if (!account) throw new Error('Wallet not connected');
+    let balance: bigint;
+    try {
+      if (!provider) throw new Error('no wallet provider');
+      balance = await provider.getBalance(account);
+    } catch (err: any) {
+      // Fallback to public RPC if wallet RPC circuit-breaker is open
+      balance = await readonlyProvider.getBalance(account);
+    }
     console.log('BalancesdnsdJSHDD:  ', balance);
     const minWei = ethers.parseEther(minimumHbar);
     if (balance < minWei) {
@@ -91,65 +99,79 @@ export function useTrade() {
     return null;
   };
   
-  const getSettlementContract = async () => {
+  const getSettlementContract = async (settlementAddr: string) => {
     if (!signer || !account) throw new Error('Wallet not connected');
-    return new ethers.Contract(settlementAddress, SETTLEMENT_ABI, signer);
+    return new ethers.Contract(settlementAddr, SETTLEMENT_ABI, signer);
+  };
+  const getSettlementReadonly = (settlementAddr: string, rpc?: string) => {
+    const ro = rpc ? new ethers.JsonRpcProvider(rpc) : readonlyProvider;
+    return new ethers.Contract(settlementAddr, SETTLEMENT_ABI, ro);
   };
 
   const getTokenContract = async (tokenAddress: string) => {
     if (!signer) throw new Error('Wallet not connected');
     return new ethers.Contract(tokenAddress, ERC20_ABI, signer);
   };
+  const getTokenReadonly = (tokenAddress: string) => new ethers.Contract(tokenAddress, ERC20_ABI, readonlyProvider);
 
   // Safely get token decimals with fallbacks to known values
   const getTokenDecimals = async (tokenAddress: string): Promise<number> => {
     try {
-      const token = await getTokenContract(tokenAddress);
+      const token = getTokenReadonly(tokenAddress);
       const d = await token.decimals();
       return Number(d);
     } catch {
-      const fallback = TOKEN_DECIMALS[tokenAddress];
-      return fallback !== undefined ? fallback : 18;
+      try {
+        const token = await getTokenContract(tokenAddress);
+        const d = await token.decimals();
+        return Number(d);
+      } catch {
+        const fallback = TOKEN_DECIMALS[tokenAddress];
+        return fallback !== undefined ? fallback : 18;
+      }
     }
   };
 
-  // Ensure we are on Hedera Testnet
-  const ensureHederaNetwork = async () => {
+  // Ensure we are on a specific chain
+  const ensureNetwork = async (targetChainId: number) => {
     if (!provider) throw new Error('Wallet not connected');
     const net = await provider.getNetwork();
-    if (Number(net.chainId) !== HEDERA_TESTNET.chainId) {
-      throw new Error('Wrong network: please switch to Hedera Testnet');
+    if (Number(net.chainId) !== targetChainId) {
+      throw new Error(`Wrong network: please switch to chainId ${targetChainId}`);
     }
   };
 
   // Ensure the token address is a deployed contract on this network
   const ensureErc20Contract = async (tokenAddress: string) => {
-    if (!provider) throw new Error('Wallet not connected');
-    const code = await provider.getCode(tokenAddress);
+    const code = await (async () => {
+      try {
+        if (!provider) throw new Error('no wallet provider');
+        return await provider.getCode(tokenAddress);
+      } catch {
+        return await readonlyProvider.getCode(tokenAddress);
+      }
+    })();
     if (!code || code === '0x') {
       throw new Error('Token contract not found on current network. Verify token address for Hedera Testnet');
     }
   };
 
-  // Get token address based on asset name
-  const getTokenAddress = (asset: string): string => {
-    const upperAsset = asset.toUpperCase();
-    if (upperAsset === 'HBAR' || upperAsset === 'WHBAR') {
-      return CONTRACTS.HBAR_TOKEN;
-    } else if (upperAsset === 'USDT') {
-      return CONTRACTS.USDT_TOKEN;
-    }
-    throw new Error(`Unknown asset: ${asset}`);
+  const getTokenAddressForNetwork = (networkKey: string, asset: string): string => {
+    const key = (networkKey || '').toLowerCase() as 'hedera' | 'polygon';
+    const addr = resolveTokenAddress(key, asset);
+    if (!addr) throw new Error(`Token address not configured for ${asset} on ${key}`);
+    return addr;
   };
 
   const checkAndApproveToken = async (
     tokenAddress: string,
-    amount: string | number
+    amount: string | number,
+    settlementAddrOverride?: string
   ): Promise<boolean> => {
     if (!signer || !account) throw new Error('Wallet not connected');
 
     try {
-      await ensureHederaNetwork();
+      // network ensured by caller
       await ensureSufficientHbar();
       await ensureErc20Contract(tokenAddress);
       const token = await getTokenContract(tokenAddress);
@@ -159,7 +181,8 @@ export function useTrade() {
 
       let hadAllowanceInfo = false;
       try {
-        const currentAllowance: bigint = await token.allowance(account, settlementAddress);
+        const allowanceTarget = settlementAddrOverride!;
+        const currentAllowance: bigint = await token.allowance(account, allowanceTarget);
         hadAllowanceInfo = true;
         if (currentAllowance >= requiredAmount) {
           return true;
@@ -168,20 +191,20 @@ export function useTrade() {
         setState(prev => ({ ...prev, orderStatus: 'approving' }));
         if (currentAllowance > 0n) {
           try {
-            const resetTx = await token.approve(settlementAddress, 0, { gasLimit: 100000, gasPrice: ethers.parseUnits('1', 'gwei') });
+            const resetTx = await token.approve(allowanceTarget, 0, { gasLimit: 100000, gasPrice: ethers.parseUnits('1', 'gwei') });
             await resetTx.wait();
           } catch (e: any) {
             // Retry without explicit gasPrice
-            const resetTx = await token.approve(settlementAddress, 0, { gasLimit: 100000 });
+            const resetTx = await token.approve(allowanceTarget, 0, { gasLimit: 100000 });
             await resetTx.wait();
           }
         }
         try {
-          const approveTx = await token.approve(settlementAddress, requiredAmount, { gasLimit: 150000, gasPrice: ethers.parseUnits('1', 'gwei') });
+          const approveTx = await token.approve(allowanceTarget, requiredAmount, { gasLimit: 150000, gasPrice: ethers.parseUnits('1', 'gwei') });
           await approveTx.wait();
         } catch (e: any) {
           // Retry without explicit gasPrice if RPC rejects
-          const approveTx = await token.approve(settlementAddress, requiredAmount, { gasLimit: 150000 });
+          const approveTx = await token.approve(allowanceTarget, requiredAmount, { gasLimit: 150000 });
           await approveTx.wait();
         }
         return true;
@@ -191,10 +214,10 @@ export function useTrade() {
         setState(prev => ({ ...prev, orderStatus: 'approving' }));
         try {
           try {
-            const resetTx = await token.approve(settlementAddress, 0, { gasLimit: 100000, gasPrice: ethers.parseUnits('1', 'gwei') });
+            const resetTx = await token.approve(settlementAddrOverride!, 0, { gasLimit: 100000, gasPrice: ethers.parseUnits('1', 'gwei') });
             await resetTx.wait();
           } catch {
-            const resetTx = await token.approve(settlementAddress, 0, { gasLimit: 100000 });
+            const resetTx = await token.approve(settlementAddrOverride!, 0, { gasLimit: 100000 });
             await resetTx.wait();
           }
         } catch (resetErr) {
@@ -202,10 +225,10 @@ export function useTrade() {
           console.warn('zero-approve failed or unnecessary, continuing to max-approve', resetErr);
         }
         try {
-          const approveTx = await token.approve(settlementAddress, requiredAmount, { gasLimit: 150000, gasPrice: ethers.parseUnits('1', 'gwei') });
+          const approveTx = await token.approve(settlementAddrOverride!, requiredAmount, { gasLimit: 150000, gasPrice: ethers.parseUnits('1', 'gwei') });
           await approveTx.wait();
         } catch {
-          const approveTx = await token.approve(settlementAddress, requiredAmount, { gasLimit: 150000 });
+          const approveTx = await token.approve(settlementAddrOverride!, requiredAmount, { gasLimit: 150000 });
           await approveTx.wait();
         }
         return true;
@@ -228,9 +251,15 @@ export function useTrade() {
 
     try {
       // Get token addresses
-      const baseTokenAddress = getTokenAddress(orderData.baseAsset);
-      const quoteTokenAddress = getTokenAddress(orderData.quoteAsset);
+      const escrowNetKey = (orderData.side === 'ask' ? orderData.fromNetwork : orderData.toNetwork).toLowerCase();
+      const escrowChain = CHAIN_REGISTRY[escrowNetKey as 'hedera' | 'polygon'];
+      if (!escrowChain) throw new Error(`Unknown network: ${escrowNetKey}`);
+      const baseTokenAddress = getTokenAddressForNetwork(orderData.fromNetwork, orderData.baseAsset);
+      const quoteTokenAddress = getTokenAddressForNetwork(orderData.toNetwork, orderData.quoteAsset);
+      const settlementAddr = resolveSettlementAddress(escrowNetKey as 'hedera' | 'polygon');
+      if (!settlementAddr) throw new Error(`Settlement address not set for ${escrowNetKey}`);
       await ensureSufficientHbar();
+      await ensureNetwork(escrowChain.chainId);
       
       // Normalize numeric fields to strings for safe unit parsing
       const priceStr: string = typeof (orderData as any).price === 'number' ? String((orderData as any).price) : String((orderData as any).price);
@@ -250,11 +279,11 @@ export function useTrade() {
 
       // Step 1: Check and approve token to settlement contract
       console.log('Step 1: Checking and approving token...');
-      await checkAndApproveToken(tokenToUse, amountToUse);
+      await checkAndApproveToken(tokenToUse, amountToUse, settlementAddr);
 
       // Step 2: Check escrow balance
       console.log('Step 2: Checking escrow balance...');
-      const escrowBalance = await checkEscrowBalance(tokenToUse);
+      const escrowBalance = await checkEscrowBalance(tokenToUse, settlementAddr, escrowChain.rpc);
       const decimals = await getTokenDecimals(tokenToUse);
       const requiredAmount = ethers.parseUnits(amountToUse, decimals);
 
@@ -268,7 +297,7 @@ export function useTrade() {
         const needed = requiredAmount - escrowBalance.available;
         const neededFormatted = ethers.formatUnits(needed, decimals);
         console.log(`Step 3: Depositing ${neededFormatted} to escrow...`);
-        await depositToEscrow(tokenToUse, neededFormatted);
+        await depositToEscrow(tokenToUse, neededFormatted, settlementAddr, escrowChain.rpc);
       } else {
         console.log('Step 3: Sufficient escrow balance, skipping deposit');
       }
@@ -351,26 +380,33 @@ export function useTrade() {
     }
   };
 
-  const checkEscrowBalance = async (tokenAddress: string): Promise<EscrowBalance> => {
-    if (!provider || !account) throw new Error('Wallet not connected');
-
+  const checkEscrowBalance = async (tokenAddress: string, settlementAddr?: string, rpcOverride?: string): Promise<EscrowBalance> => {
+    if (!account) throw new Error('Wallet not connected');
     try {
-      const settlement = await getSettlementContract();
+      const settlement = getSettlementReadonly(settlementAddr!, rpcOverride);
       const [total, available, locked] = await settlement.checkEscrowBalance(account, tokenAddress);
       return { total, available, locked };
     } catch (error) {
-      console.error('Escrow balance check error:', error);
-      throw error;
+      console.error('Escrow balance check error (readonly):', error);
+      // Fallback to signer provider if readonly fails for any reason
+      try {
+        const settlement = await getSettlementContract(settlementAddr!);
+        const [total, available, locked] = await settlement.checkEscrowBalance(account, tokenAddress);
+        return { total, available, locked };
+      } catch (e2) {
+        console.error('Escrow balance check error (signer):', e2);
+        throw e2;
+      }
     }
   };
 
-  const depositToEscrow = async (tokenAddress: string, amount: string): Promise<void> => {
+  const depositToEscrow = async (tokenAddress: string, amount: string, settlementAddr?: string, rpcOverride?: string): Promise<void> => {
     if (!signer || !account) throw new Error('Wallet not connected');
 
     setState(prev => ({ ...prev, loading: true, orderStatus: 'depositing' }));
     
     try {
-      await ensureHederaNetwork();
+      // ensureNetwork is done by caller
       await ensureSufficientHbar();
       await ensureErc20Contract(tokenAddress);
       const decimals = await getTokenDecimals(tokenAddress);
@@ -379,10 +415,10 @@ export function useTrade() {
       console.log(`Depositing ${amount} tokens to escrow...`);
 
       // Ensure unlimited allowance before depositing
-      await checkAndApproveToken(tokenAddress, amount);
+      await checkAndApproveToken(tokenAddress, amount, settlementAddr);
 
       // Then deposit to escrow with simulate + retry
-      const settlement = await getSettlementContract();
+      const settlement = await getSettlementContract(settlementAddr!);
       console.log('Depositing to escrow contract...');
       try {
         // Simulate to surface revert reasons early (ethers v6)
@@ -392,12 +428,34 @@ export function useTrade() {
         const hederaMsg = extractHederaErrorMessage(simErr);
         if (hederaMsg) throw new Error(hederaMsg);
       }
+      const ro = rpcOverride ? new ethers.JsonRpcProvider(rpcOverride) : readonlyProvider;
+      const waitWithRetry = async (txHash: string, maxRetries = 6) => {
+        let attempt = 0;
+        // eslint-disable-next-line no-constant-condition
+        while (true) {
+          try {
+            // 2 min timeout per attempt
+            await ro.waitForTransaction(txHash, 1, 120_000);
+            return;
+          } catch (err: any) {
+            const msg = String(err?.message || '');
+            const code = (err?.code ?? '').toString();
+            const isCircuit = code === '-32603' || msg.includes('circuit breaker');
+            if (!isCircuit || attempt >= maxRetries) throw err;
+            // exponential backoff 1s, 2s, 4s, ... up to ~64s
+            const delayMs = 1000 * Math.pow(2, attempt);
+            await new Promise(r => setTimeout(r, delayMs));
+            attempt += 1;
+          }
+        }
+      };
+
       try {
         const depositTx = await settlement.depositToEscrow(tokenAddress, parsedAmount, { gasLimit: 300000, gasPrice: ethers.parseUnits('1', 'gwei') });
-        await depositTx.wait();
+        await waitWithRetry(depositTx.hash as string);
       } catch (e: any) {
         const depositTx = await settlement.depositToEscrow(tokenAddress, parsedAmount, { gasLimit: 300000 });
-        await depositTx.wait();
+        await waitWithRetry(depositTx.hash as string);
       }
       console.log('Escrow deposit complete');
 

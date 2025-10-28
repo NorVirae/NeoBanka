@@ -1,52 +1,11 @@
 // src/pages/Index.tsx - VERSION FINALE
 import { TradingTerminal } from "../components/TradingTerminal";
 import { useEffect, useState } from "react";
-import { priceService } from "@/lib/priceService";
-import { Candlestick } from "@/components/Candlestick";
 import { WalletConnect } from "../components/walletConnect";
-import { VaultDashboard } from "../components/VaultDashboard";
-import { ImpactPool } from "../components/ImpactPool";
-import { useImpactPool } from "../hooks/useImpactPool";
-import { useToast } from "@/hooks/use-toast";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 
 const Index = () => {
   const [symbol, setSymbol] = useState("HBAR_USDT");
-  
-  const { stats, donateToPool, mintCertificate } = useImpactPool();
-  const { toast } = useToast();
-
-  const handleDonation = async (amount: string) => {
-    const result = await donateToPool(amount);
-    if (result.success) {
-      toast({
-        title: "Donation successful",
-        description: `Successfully donated ${amount} WHBAR to impact projects`,
-      });
-    } else {
-      toast({
-        title: "Donation failed",
-        description: result.error,
-        variant: "destructive",
-      });
-    }
-  };
-
-  const handleCertificateMint = async (certificateId: string) => {
-    const result = await mintCertificate(certificateId);
-    if (result.success) {
-      toast({
-        title: "Certificate minted",
-        description: "Impact certificate has been minted as HTS token",
-      });
-    } else {
-      toast({
-        title: "Minting failed",
-        description: result.error,
-        variant: "destructive",
-      });
-    }
-  };
 
   return (
     <div className="min-h-screen bg-background">
@@ -70,7 +29,6 @@ const Index = () => {
 
           <TabsContent value="trading" className="space-y-4">
             <TradingTerminal onSymbolChange={setSymbol} />
-            
           </TabsContent>
         </Tabs>
       </main>

@@ -23,7 +23,7 @@ import {
 import { useWallet } from '../hooks/useWallet';
 import { orderbookApi } from '../lib/api';
 import { useTrade } from '../hooks/useTrade';
-import { CONTRACTS } from '../lib/contracts';
+import { resolveSettlementAddress } from '../lib/contracts';
 import { priceService, type PriceData, PriceService } from '../lib/priceService';
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, ResponsiveContainer, Tooltip } from 'recharts';
 import LabelTerminal from './ui/label-terminal';
@@ -571,7 +571,7 @@ export function TradingTerminal({ onSymbolChange }: { onSymbolChange?: (s: strin
     switchToHederaTestnet
   } = useWallet();
   const [fromNetwork, setFromNetwork] = useState('hedera');
-  const [toNetwork, setToNetwork] = useState('polygon');
+  const [toNetwork, setToNetwork] = useState('hedera');
 
   // Initialize trade hook at component level
   const { submitOrder, orderStatus, loading: tradeLoading } = useTrade();
@@ -719,7 +719,12 @@ export function TradingTerminal({ onSymbolChange }: { onSymbolChange?: (s: strin
   useEffect(() => {
     if (isConnected) {
       addLog(`Wallet connected: ${formatAddress(account)}`, 'success');
-      addLog(`Settlement contract ready at ${formatAddress(CONTRACTS.SETTLEMENT_ADDRESS)}`, 'success');
+      try {
+        const hed = resolveSettlementAddress('hedera');
+        if (hed) addLog(`Hedera settlement ${formatAddress(hed)}`, 'success');
+        const pol = resolveSettlementAddress('polygon');
+        if (pol) addLog(`Polygon settlement ${formatAddress(pol)}`, 'success');
+      } catch {}
     }
   }, [isConnected, account]);
 

@@ -1,19 +1,31 @@
 // src/lib/contracts.ts
 
-// ===== ADDRESSES =====
-export const CONTRACTS = {
-    VAULT_ADDRESS: "0xF46A4BaF773a88dF32170AeEfa566016Fa518408",
-    WHBAR_ADDRESS: "0xA219e375D1F84A50273c93FaaF5EACD285bD9990",
-    IMPACT_CERTIFICATE_ADDRESS: "0xB57E12b2F6d5C36D03a9c48EA45f9ea6b971878e",
-    IMPACT_POOL_ADDRESS: "0x518fC4A2b56f592E0296649D4955Fde16F464549",
-    SETTLEMENT_ADDRESS: "0x817da292D692a09392EA28F846BC0814f6f5eB61",
-    // Token addresses for trading (Hedera Testnet)
-    HBAR_TOKEN: "0xA219e375D1F84A50273c93FaaF5EACD285bD9990",
-    USDT_TOKEN: "0x62bcF51859E23cc47ddc6C3144B045619476Be92",
-  } as const;
+// ===== PER-CHAIN REGISTRY (read from env) =====
+const env = (import.meta as any).env || {};
+
+export const CHAIN_REGISTRY = {
+  hedera: {
+    chainId: Number(env.VITE_HEDERA_CHAIN_ID) || 296,
+    rpc: env.VITE_HEDERA_RPC || "https://testnet.hashio.io/api",
+    settlement: env.VITE_HEDERA_SETTLEMENT || "",
+    tokens: {
+      HBAR: env.VITE_HEDERA_HBAR || "",
+      USDT: env.VITE_HEDERA_USDT || "",
+    },
+  },
+  polygon: {
+    chainId: Number(env.VITE_POLYGON_CHAIN_ID) || 80002,
+    rpc: env.VITE_POLYGON_RPC || "https://rpc-amoy.polygon.technology/",
+    settlement: env.VITE_POLYGON_SETTLEMENT || "",
+    tokens: {
+      HBAR: env.VITE_POLYGON_HBAR || "",
+      USDT: env.VITE_POLYGON_USDT || "",
+    },
+  },
+} as const;
   
   // ===== HEDERA TESTNET CONFIG =====
-  export const HEDERA_TESTNET = {
+export const HEDERA_TESTNET = {
     chainId: 296,
     chainName: "Hedera Testnet",
     nativeCurrency: {
@@ -141,7 +153,16 @@ export const VAULT_ABI = [
 
   // ===== KNOWN TOKEN DECIMALS (fallbacks if on-chain decimals() fails) =====
   export const TOKEN_DECIMALS: Record<string, number> = {
-    // Provided: all tokens use 18 decimals on Hedera Testnet
-    [CONTRACTS.HBAR_TOKEN]: 18,
-    [CONTRACTS.USDT_TOKEN]: 18,
+  // Defaults; override at runtime if needed
+  "18": 18,
   };
+
+export function resolveTokenAddress(network: "hedera" | "polygon", symbol: string): string {
+  const reg = CHAIN_REGISTRY[network];
+  const addr = reg?.tokens?.[symbol.toUpperCase() as "HBAR" | "USDT"] || "";
+  return addr;
+}
+
+export function resolveSettlementAddress(network: "hedera" | "polygon"): string {
+  return CHAIN_REGISTRY[network]?.settlement || "";
+}

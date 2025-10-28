@@ -1,6 +1,8 @@
 from decimal import Decimal
 import json
 import logging
+import os
+import asyncio
 from fastapi import HTTPException, Request
 from fastapi.responses import JSONResponse
 
@@ -75,9 +77,9 @@ class APIService:
             logger.info(f"Validating prerequisites for order: {payload_json}")
             validation_result = await APIHelper.validate_order_prerequisites(
                 order_data=payload_json,
-                settlement_client=settlement_client,
-                WEB3_PROVIDER=WEB3PROVIDER,
+                SUPPORTED_NETWORKS=SUPPORTED_NETWORKS,
                 TOKEN_ADDRESSES=TOKEN_ADDRESSES,
+                PRIVATE_KEY=PRIVATE_KEY,
             )
 
             if not validation_result["valid"]:
@@ -231,22 +233,44 @@ class APIService:
                     "timestamp": next_best_order.timestamp,
                 }
 
-            # Step 3: Settle trades if any exist
+            # Step 3: Settle trades if any exist (async by default)
             settlement_info = {"settled": False}
             if converted_trades:
                 logger.info(f"Attempting to settle {len(converted_trades)} trade(s)")
-                # pass supported networks and settlement contract details into the helper
-                # Enforce client-signed signatures: require client-provided signatures and do not fall back to server demo signatures
-                settlement_info = await APIHelper.settle_trades_if_any(
-                    order_dict,
-                    SUPPORTED_NETWORKS,
-                    TRADE_SETTLEMENT_CONTRACT_ADDRESS,
-                    CONTRACT_ABI,
-                    PRIVATE_KEY,
-                    TOKEN_ADDRESSES,
-                    REQUIRE_CLIENT_SIGNATURES=True,
-                )
-                logger.info(f"Settlement result: {settlement_info}")
+                try:
+                    sync_flag = os.getenv("SETTLEMENT_SYNC", "false").lower() in ("1", "true", "yes")
+                    timeout_s = int(os.getenv("SETTLEMENT_SYNC_TIMEOUT", "8"))
+
+                    async def _run_settlement_offthread():
+                        loop = asyncio.get_running_loop()
+                        def runner():
+                            return asyncio.run(
+                                APIHelper.settle_trades_if_any(
+                                    order_dict,
+                                    SUPPORTED_NETWORKS,
+                                    TRADE_SETTLEMENT_CONTRACT_ADDRESS,
+                                    CONTRACT_ABI,
+                                    PRIVATE_KEY,
+                                    TOKEN_ADDRESSES,
+                                    REQUIRE_CLIENT_SIGNATURES=True,
+                                )
+                            )
+                        return await loop.run_in_executor(None, runner)
+
+                    if sync_flag:
+                        try:
+                            settlement_info = await asyncio.wait_for(_run_settlement_offthread(), timeout=timeout_s)
+                        except asyncio.TimeoutError:
+                            settlement_info = {"settled": False, "reason": "timeout"}
+                            # fire-and-forget background continuation
+                            asyncio.create_task(_run_settlement_offthread())
+                    else:
+                        # run in background and return immediately
+                        asyncio.create_task(_run_settlement_offthread())
+                        settlement_info = {"settled": False, "reason": "processing_async"}
+                except Exception as e:
+                    logger.error(f"Settlement error: {e}")
+                    settlement_info = {"settled": False, "error": str(e)}
 
                 # Persist trades
                 try:
