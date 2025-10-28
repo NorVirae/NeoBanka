@@ -8,3 +8,16 @@ TradeSettlement deployed to: 0x817da292D692a09392EA28F846BC0814f6f5eB61 //new
 HBAR deployed to: 0x66B8244b08be8F4Cec1A23C5c57A1d7b8A27189D
 USDT deployed to: 0x62bcF51859E23cc47ddc6C3144B045619476Be92
 //---------USDT deployed to: 0x62bcF51859E23cc47ddc6C3144B045619476Be92
+
+
+{//mainnet
+  "network": "polygon",
+  "contract": "TradeSettlement",
+  "address": "0x10F0F2cb456BEd15655afB22ddd7d0EEE11FdBc9",
+  "deployer": "0x877664Ae1f1ca217977562A04592eCbCADb2Ca58",
+  "deploymentHash": "0xbfcc46e61aa11f96e62e831f3e0a9ad040cbd1a6369d1012a3b59adc8a13ca0e",
+  "gasUsed": "1711684",
+  "timestamp": "2025-10-28T02:19:50.706Z"
+  HBAR deployed to: 0x41086d277f8A183A351310eC89d1AA9Dc1e67B7B
+USDT deployed to: 0x750702AA1dE631277576602b780A38790c36E19e
+}

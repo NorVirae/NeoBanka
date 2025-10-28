@@ -1,1 +1,13 @@
 {"type": "order_placed", "symbol": "HBAR_USDT", "orderId": 1, "account": "0xe0C12c21A66c75A70F02AEE12AC05636aE7fd0c0", "side": "bid", "price": 0.184, "quantity": 100.0, "timestamp": 1761610446770}
+{"type": "order_placed", "symbol": "HBAR_USDT", "orderId": 1, "account": "0xe0C12c21A66c75A70F02AEE12AC05636aE7fd0c0", "side": "bid", "price": 0.1941, "quantity": 100.0, "timestamp": 1761614487205}
+{"type": "order_placed", "symbol": "HBAR_USDT", "orderId": 1, "account": "0xe0C12c21A66c75A70F02AEE12AC05636aE7fd0c0", "side": "ask", "price": 0.1946, "quantity": 200.0, "timestamp": 1761615433519}
+{"type": "order_placed", "symbol": "HBAR_USDT", "orderId": 2, "account": "0xe0C12c21A66c75A70F02AEE12AC05636aE7fd0c0", "side": "ask", "price": 0.1941, "quantity": 200.0, "timestamp": 1761615460090}
+{"type": "order_placed", "symbol": "HBAR_USDT", "orderId": 1, "account": "0xe0C12c21A66c75A70F02AEE12AC05636aE7fd0c0", "side": "bid", "price": 0.1947, "quantity": 19.98, "timestamp": 1761615484340}
+{"type": "trade_executed", "symbol": "HBAR_USDT", "price": 0.1941, "quantity": 19.98, "timestamp": 1761615484340}
+{"type": "order_placed", "symbol": "HBAR_USDT", "orderId": 1, "account": "0xe0C12c21A66c75A70F02AEE12AC05636aE7fd0c0", "side": "bid", "price": 0.195, "quantity": 50.0, "timestamp": 1761615551136}
+{"type": "trade_executed", "symbol": "HBAR_USDT", "price": 0.1941, "quantity": 50.0, "timestamp": 1761615551136}
+{"type": "order_placed", "symbol": "HBAR_USDT", "orderId": 1, "account": "0xe0C12c21A66c75A70F02AEE12AC05636aE7fd0c0", "side": "bid", "price": 0.1944, "quantity": 50.0, "timestamp": 1761615598062}
+{"type": "trade_executed", "symbol": "HBAR_USDT", "price": 0.1941, "quantity": 50.0, "timestamp": 1761615598062}
+{"type": "order_placed", "symbol": "HBAR_USDT", "orderId": 1, "account": "0x877664Ae1f1ca217977562A04592eCbCADb2Ca58", "side": "bid", "price": 0.1945, "quantity": 100.0, "timestamp": 1761620602036}
+{"type": "order_placed", "symbol": "HBAR_USDT", "orderId": 1, "account": "0xe0C12c21A66c75A70F02AEE12AC05636aE7fd0c0", "side": "ask", "price": 0.1959, "quantity": 10.0, "timestamp": 1761621055881}
+{"type": "trade_executed", "symbol": "HBAR_USDT", "price": 0.1945, "quantity": 10.0, "timestamp": 1761621055881}

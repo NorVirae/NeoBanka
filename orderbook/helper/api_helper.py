@@ -5,6 +5,7 @@ from dotenv import load_dotenv
 
 # import asyncio
 import logging
+import time
 
 from src.trade_settlement_client import SettlementClient
 
@@ -32,11 +33,23 @@ load_dotenv()
 class APIHelper:
 
     @staticmethod
-    def get_token_address(symbol: str, TOKEN_ADDRESSES: dict) -> str:
-        """Get token address from symbol"""
-        token_address = TOKEN_ADDRESSES.get(symbol.upper(), symbol)
-        print(token_address, "TOKEN_ADDRESS")
-        return token_address
+    def get_token_address(symbol: str, network_key: str, SUPPORTED_NETWORKS: dict, TOKEN_ADDRESSES: dict | None = None) -> str:
+        """Resolve token address by symbol and network key, fallback to legacy mapping."""
+        symbol_up = symbol.upper()
+        try:
+            net = SUPPORTED_NETWORKS.get(network_key) or {}
+            tokens = net.get("tokens") or {}
+            addr = tokens.get(symbol_up)
+            if addr:
+                print(addr, "TOKEN_ADDRESS")
+                return addr
+        except Exception:
+            pass
+        if TOKEN_ADDRESSES:
+            token_address = TOKEN_ADDRESSES.get(symbol_up, symbol)
+            print(token_address, "TOKEN_ADDRESS")
+            return token_address
+        return symbol
 
     @staticmethod
     def load_abi(abi_path):
@@ -48,9 +61,9 @@ class APIHelper:
     @staticmethod
     async def validate_order_prerequisites(
         order_data: dict,
-        settlement_client: SettlementClient,
-        WEB3_PROVIDER: str,
+        SUPPORTED_NETWORKS: dict,
         TOKEN_ADDRESSES: dict,
+        PRIVATE_KEY: str,
     ) -> dict:
         """
         Validate that user has sufficient escrow balance and locked funds for the order
@@ -63,30 +76,33 @@ class APIHelper:
             quantity = float(order_data["quantity"])
             price = float(order_data["price"])
 
-            # Get token addresses
-            base_asset = APIHelper.get_token_address(
-                order_data["baseAsset"], TOKEN_ADDRESSES
-            )
-            quote_asset = APIHelper.get_token_address(
-                order_data["quoteAsset"], TOKEN_ADDRESSES
-            )
+            # Resolve networks
+            from_network = (order_data.get("from_network") or order_data.get("fromNetwork") or "").lower()
+            to_network = (order_data.get("to_network") or order_data.get("toNetwork") or "").lower()
+
+            # Get token addresses for each network
+            base_asset_from = APIHelper.get_token_address(order_data["baseAsset"], from_network, SUPPORTED_NETWORKS, TOKEN_ADDRESSES)
+            quote_asset_to = APIHelper.get_token_address(order_data["quoteAsset"], to_network, SUPPORTED_NETWORKS, TOKEN_ADDRESSES)
 
             if side.lower() == "ask":
-                # Seller needs base asset in escrow
                 required_amount = quantity
-                token_to_check = base_asset
-            else:  # bid
-                # Buyer needs quote asset in escrow
+                token_to_check = base_asset_from
+                network_key = from_network
+            else:
                 required_amount = quantity * price
-                token_to_check = quote_asset
+                token_to_check = quote_asset_to
+                network_key = to_network
 
-
-            print(settlement_client, "SETTLEMENT CLIENT")
-
-            # Check escrow balance
-            balance_info = settlement_client.check_escrow_balance(
-                account, token_to_check
+            # Create a temporary client for the correct chain
+            net_cfg = SUPPORTED_NETWORKS.get(network_key) or {}
+            client = SettlementClient(
+                net_cfg.get("rpc"),
+                net_cfg.get("contract_address"),
+                PRIVATE_KEY,
             )
+
+            # Check escrow balance on that chain
+            balance_info = client.check_escrow_balance(account, token_to_check)
 
             available = balance_info.get("available", 0)
 
@@ -166,7 +182,11 @@ class APIHelper:
         Settle cross-chain trades using the new settlement contract.
         Handles both source and destination chain settlements.
         """
+        start_ts = time.time()
+        req_id = order_dict.get("request_id") or f"req_{int(start_ts*1000)}"
+        logger.info(f"[{req_id}] Settlement start | trades={len(order_dict.get('trades') or [])} base={order_dict.get('baseAsset')} quote={order_dict.get('quoteAsset')}")
         if not order_dict.get("trades"):
+            logger.info(f"[{req_id}] No trades to settle")
             return {"settled": False, "reason": "No trades to settle"}
 
         settlement_results = []
@@ -175,7 +195,9 @@ class APIHelper:
             # Import SettlementClient
             
             
-            for trade in order_dict["trades"]:
+            for idx, trade in enumerate(order_dict["trades"]):
+                t0 = time.time()
+                logger.info(f"[{req_id}] Trade[{idx}] start | price={trade.get('price')} qty={trade.get('quantity')}")
                 # Extract party information
                 party1_addr = trade["party1"][0]
                 party1_side = trade["party1"][1]
@@ -195,6 +217,8 @@ class APIHelper:
                 source_network_cfg = SUPPORTED_NETWORKS.get(party1_from_network)
                 dest_network_cfg = SUPPORTED_NETWORKS.get(party2_from_network)
 
+                logger.info(f"[{req_id}] Trade[{idx}] networks | source={party1_from_network} dest={party2_from_network}")
+
                 if not source_network_cfg or not dest_network_cfg:
                     settlement_results.append({
                         "trade": trade,
@@ -203,6 +227,7 @@ class APIHelper:
                             "error": "Network configuration not found"
                         }
                     })
+                    logger.warning(f"[{req_id}] Trade[{idx}] missing network configuration")
                     continue
 
                 # Get contract addresses and RPCs
@@ -216,6 +241,7 @@ class APIHelper:
                 # Create clients for both chains (using matching engine key)
                 client_source = SettlementClient(source_rpc, source_contract, PRIVATE_KEY)
                 client_dest = SettlementClient(dest_rpc, dest_contract, PRIVATE_KEY)
+                logger.info(f"[{req_id}] Trade[{idx}] clients ready | source_chain_id={source_chain_id} dest_chain_id={dest_chain_id}")
 
                 # Get token addresses
                 base_token = APIHelper.get_token_address(order_dict["baseAsset"], TOKEN_ADDRESSES)
@@ -224,6 +250,7 @@ class APIHelper:
                 # Get nonces
                 nonce1 = client_source.get_user_nonce(party1_addr, base_token)
                 nonce2 = client_dest.get_user_nonce(party2_addr, base_token)
+                logger.info(f"[{req_id}] Trade[{idx}] nonces | n1={nonce1} n2={nonce2}")
 
                 # Trade parameters
                 order_id = str(order_dict["orderId"])
@@ -242,6 +269,7 @@ class APIHelper:
                             "trade": trade,
                             "settlement_result": {"success": False, "error": "Missing client signature for party1"}
                         })
+                        logger.warning(f"[{req_id}] Trade[{idx}] missing client signature party1")
                         continue
                     sig1 = client_source.create_trade_signature(
                         party1_priv_key, order_id, base_token, quote_token,
@@ -255,6 +283,7 @@ class APIHelper:
                             "trade": trade,
                             "settlement_result": {"success": False, "error": "Missing client signature for party2"}
                         })
+                        logger.warning(f"[{req_id}] Trade[{idx}] missing client signature party2")
                         continue
                     sig2 = client_dest.create_trade_signature(
                         party2_priv_key, order_id, base_token, quote_token,
@@ -277,29 +306,44 @@ class APIHelper:
                     is_source_chain=False, chain_id=dest_chain_id
                 )
 
-                # Settle on source chain
-                logger.info(f"Settling on source chain (Chain ID: {source_chain_id})")
-                result_source = client_source.settle_cross_chain_trade(
-                    order_id, party1_addr, party2_addr,
-                    party1_receive_wallet, party2_receive_wallet,
-                    base_token, quote_token, price, quantity,
-                    party1_side, party2_side,
-                    source_chain_id, dest_chain_id,
-                    timestamp, nonce1, nonce2,
-                    sig1, sig2, me_sig_source, is_source_chain=True
-                )
+                same_chain = source_chain_id == dest_chain_id
+                if same_chain:
+                    logger.info(f"[{req_id}] Trade[{idx}] same-chain settlement on chain_id={source_chain_id}")
+                    result_source = client_source.settle_cross_chain_trade(
+                        order_id, party1_addr, party2_addr,
+                        party1_receive_wallet, party2_receive_wallet,
+                        base_token, quote_token, price, quantity,
+                        party1_side, party2_side,
+                        source_chain_id, dest_chain_id,
+                        timestamp, nonce1, nonce2,
+                        sig1, sig2, me_sig_source, is_source_chain=True
+                    )
+                    result_dest = {"success": True, "skipped": True, "reason": "same_chain_single_leg"}
+                else:
+                    # Settle on source chain
+                    logger.info(f"Settling on source chain (Chain ID: {source_chain_id})")
+                    logger.info(f"[{req_id}] Trade[{idx}] settle source chain")
+                    result_source = client_source.settle_cross_chain_trade(
+                        order_id, party1_addr, party2_addr,
+                        party1_receive_wallet, party2_receive_wallet,
+                        base_token, quote_token, price, quantity,
+                        party1_side, party2_side,
+                        source_chain_id, dest_chain_id,
+                        timestamp, nonce1, nonce2,
+                        sig1, sig2, me_sig_source, is_source_chain=True
+                    )
 
-                # Settle on destination chain
-                logger.info(f"Settling on destination chain (Chain ID: {dest_chain_id})")
-                result_dest = client_dest.settle_cross_chain_trade(
-                    order_id, party1_addr, party2_addr,
-                    party1_receive_wallet, party2_receive_wallet,
-                    base_token, quote_token, price, quantity,
-                    party1_side, party2_side,
-                    source_chain_id, dest_chain_id,
-                    timestamp, nonce1, nonce2,
-                    sig1, sig2, me_sig_dest, is_source_chain=False
-                )
+                    # Settle on destination chain
+                    logger.info(f"[{req_id}] Trade[{idx}] settle destination chain")
+                    result_dest = client_dest.settle_cross_chain_trade(
+                        order_id, party1_addr, party2_addr,
+                        party1_receive_wallet, party2_receive_wallet,
+                        base_token, quote_token, price, quantity,
+                        party1_side, party2_side,
+                        source_chain_id, dest_chain_id,
+                        timestamp, nonce1, nonce2,
+                        sig1, sig2, me_sig_dest, is_source_chain=False
+                    )
 
                 settlement_results.append({
                     "trade": trade,
@@ -309,7 +353,10 @@ class APIHelper:
                         "destination_chain": result_dest
                     }
                 })
+                logger.info(f"[{req_id}] Trade[{idx}] done | ok_source={result_source.get('success')} ok_dest={result_dest.get('success')} elapsed={time.time()-t0:.2f}s")
 
+            total_elapsed = time.time() - start_ts
+            logger.info(f"[{req_id}] Settlement finished | trades={len(order_dict['trades'])} elapsed={total_elapsed:.2f}s ok={sum(1 for r in settlement_results if r['settlement_result'].get('success'))}")
             return {
                 "settled": True,
                 "settlement_results": settlement_results,
@@ -321,7 +368,7 @@ class APIHelper:
             }
 
         except Exception as e:
-            logger.error(f"Error during trade settlement: {e}")
+            logger.error(f"[{req_id}] Error during trade settlement: {e}")
             return {"settled": False, "error": str(e)}
 
     @staticmethod
