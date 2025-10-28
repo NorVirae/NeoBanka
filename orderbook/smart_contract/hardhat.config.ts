@@ -20,6 +20,18 @@ const config: HardhatUserConfig = {
     testnet: {
       url: process.env.HEDERA_RPC_URL || "https://testnet.hashio.io/api",
       accounts: process.env.HEDERA_PRIVATE_KEY ? [process.env.HEDERA_PRIVATE_KEY] : []
+    },
+    polygonAmoy: {
+      // Polygon Amoy testnet (Polygon PoS testnet)
+      url: process.env.POLYGON_AMOY_RPC_URL || "https://rpc-amoy.polygon.technology/",
+      accounts: process.env.POLYGON_PRIVATE_KEY ? [process.env.POLYGON_PRIVATE_KEY] : [],
+      chainId: 80002
+    },
+    polygon: {
+      // Polygon Mainnet
+      url: process.env.POLYGON_RPC_URL || "https://polygon-rpc.com",
+      accounts: process.env.HEDERA_PRIVATE_KEY ? [process.env.HEDERA_PRIVATE_KEY] : [],
+      chainId: 137
     }
   }
 };
