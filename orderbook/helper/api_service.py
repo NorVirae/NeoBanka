@@ -268,14 +268,14 @@ class APIService:
                     "timestamp": next_best_order.timestamp,
                 }
 
-            # Step 3: Settle trades if any exist (async by default)
+            # Step 3: Settle trades if any exist (synchronous required)
             settlement_info = {"settled": False}
-            has_any_sig = any(t.get("signature1") or t.get("signature2") for t in converted_trades)
-            if converted_trades and has_any_sig:
+            if converted_trades:
                 logger.info(f"Attempting to settle {len(converted_trades)} trade(s)")
                 try:
-                    sync_flag = os.getenv("SETTLEMENT_SYNC", "false").lower() in ("1", "true", "yes")
-                    timeout_s = int(os.getenv("SETTLEMENT_SYNC_TIMEOUT", "8"))
+                    # Force synchronous settlement so matching only succeeds if on-chain settlement succeeds
+                    sync_flag = True
+                    timeout_s = int(os.getenv("SETTLEMENT_SYNC_TIMEOUT", "20"))
 
                     async def _run_settlement_offthread():
                         loop = asyncio.get_running_loop()
@@ -300,8 +300,6 @@ class APIService:
                             settlement_info = await asyncio.wait_for(_run_settlement_offthread(), timeout=timeout_s)
                         except asyncio.TimeoutError:
                             settlement_info = {"settled": False, "reason": "timeout"}
-                            # fire-and-forget background continuation
-                            asyncio.create_task(_run_settlement_offthread())
                     else:
                         # run in background and return immediately
                         asyncio.create_task(_run_settlement_offthread())
@@ -310,29 +308,62 @@ class APIService:
                     logger.error(f"Settlement error: {e}")
                     settlement_info = {"settled": False, "error": str(e)}
 
-                # Persist trades
-                try:
-                    for tr in converted_trades:
-                        rec = {
-                            "type": "trade_executed",
-                            "symbol": symbol,
-                            "price": float(tr["price"]),
-                            "quantity": float(tr["quantity"]),
-                            "timestamp": int(tr["timestamp"]),
-                        }
-                        if activity_log is not None:
-                            activity_log.append(rec)
-                        if append_file is not None:
-                            append_file(rec)
-                except Exception:
-                    pass
+                # Do not persist trades off-chain unless on-chain settlement succeeded
+                # We defer recording until after we verify 'ok' below
 
-            if converted_trades and not has_any_sig:
-                settlement_info = {"settled": False, "reason": "awaiting_client_signatures"}
-                logger.info("Order registered; skipping settlement until client signatures are provided")
-            logger.info(
-                f"Order processed successfully with {len(converted_trades)} trades"
-            )
+            # No signature gating; settlement is owner-authorized on-chain now
+            # If settlement did not fully succeed, roll back the match and return error
+            try:
+                if converted_trades:
+                    ok = bool(settlement_info.get("settled")) and (
+                        settlement_info.get("successful_settlements", 0) >= len(converted_trades)
+                    )
+                    if not ok:
+                        try:
+                            # best-effort cancel of the just-placed order in the book
+                            if order and order.get("order_id"):
+                                order_book.cancel_order(order.get("side"), order.get("order_id"))
+                        except Exception:
+                            pass
+                        return JSONResponse(
+                            content={
+                                "message": "On-chain settlement failed; order not accepted",
+                                "order": None,
+                                "status_code": 0,
+                                "settlement_info": settlement_info,
+                            },
+                            status_code=400,
+                        )
+                    else:
+                        # Only now record trades as executed since on-chain settlement succeeded
+                        try:
+                            # Prefer detailed per-trade success when available
+                            results = (settlement_info or {}).get("settlement_results") or []
+                            for idx, tr in enumerate(converted_trades):
+                                tr_ok = True
+                                try:
+                                    tr_ok = bool((results[idx] or {}).get("settlement_result", {}).get("success", True))
+                                except Exception:
+                                    tr_ok = True
+                                if not tr_ok:
+                                    continue
+                                rec = {
+                                    "type": "trade_executed",
+                                    "symbol": symbol,
+                                    "price": float(tr["price"]),
+                                    "quantity": float(tr["quantity"]),
+                                    "timestamp": int(tr["timestamp"]),
+                                }
+                                if activity_log is not None:
+                                    activity_log.append(rec)
+                                if append_file is not None:
+                                    append_file(rec)
+                        except Exception:
+                            pass
+            except Exception:
+                pass
+
+            logger.info(f"Order processed successfully with {len(converted_trades)} trades")
 
             return JSONResponse(
                 content={

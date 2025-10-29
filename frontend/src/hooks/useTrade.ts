@@ -49,6 +49,8 @@ export function useTrade() {
   const { provider, account, signer } = useWallet();
   // Read-only fallback provider to bypass wallet RPC throttling / circuit breaker
   const readonlyProvider = new ethers.JsonRpcProvider(HEDERA_TESTNET.rpcUrls[0]);
+  // Cache contract code lookups to avoid repeated eth_getCode calls (rate limit friendly)
+  const contractCodeCache = new Map<string, boolean>();
   
   // Ensure wallet has enough HBAR for gas
   const ensureSufficientHbar = async (minimumHbar: string = '0.001') => {
@@ -302,26 +304,7 @@ export function useTrade() {
         const neededFormatted = ethers.formatUnits(needed, decimals);
         console.log(`Step 3: Depositing ${neededFormatted} to escrow...`);
         await depositToEscrow(tokenToUse, neededFormatted, settlementAddr, escrowChain.rpc);
-        // After deposit, poll escrow until funds are visible or timeout
-        const maxWaitMs = 30000;
-        const start = Date.now();
-        let lastAvailable = escrowBalance.available;
-        while (Date.now() - start < maxWaitMs) {
-          try {
-            const b = await checkEscrowBalance(tokenToUse, settlementAddr, escrowChain.rpc);
-            lastAvailable = b.available;
-            if (lastAvailable >= requiredAmount) break;
-          } catch (e) {
-            // ignore transient errors
-          }
-          // Exponential backoff up to ~2s
-          const elapsed = Date.now() - start;
-          const sleepMs = Math.min(2000, 250 + Math.floor(elapsed / 4));
-          await new Promise(r => setTimeout(r, sleepMs));
-        }
-        if (lastAvailable < requiredAmount) {
-          throw new Error('Escrow not updated yet. Please try again in a few seconds.');
-        }
+        // Do not block on mirror-node updates; proceed to submit order
       } else {
         console.log('Step 3: Sufficient escrow balance, skipping deposit');
       }
@@ -405,16 +388,57 @@ export function useTrade() {
   const checkEscrowBalance = async (tokenAddress: string, settlementAddr?: string, rpcOverride?: string): Promise<EscrowBalance> => {
     if (!account) throw new Error('Wallet not connected');
     try {
-      const settlement = getSettlementReadonly(settlementAddr!, rpcOverride);
-      const [total, available, locked] = await settlement.checkEscrowBalance(account, tokenAddress);
-      return { total, available, locked };
+      const ro = rpcOverride ? new ethers.JsonRpcProvider(rpcOverride) : readonlyProvider;
+      // Verify contract exists on target RPC (rate-limit tolerant)
+      const cacheKey = (settlementAddr || '').toLowerCase();
+      if (!contractCodeCache.get(cacheKey)) {
+        const maxAttempts = 3;
+        for (let attempt = 0; attempt < maxAttempts; attempt++) {
+          try {
+            const code = await ro.getCode(settlementAddr!);
+            if (code && code !== '0x') {
+              contractCodeCache.set(cacheKey, true);
+              break;
+            }
+            // If empty, still proceed; some RPCs may lag. Do not hard fail here.
+            break;
+          } catch (err: any) {
+            // Back off on mirror-node timeouts or rate limits
+            const msg = String(err?.message || '');
+            if (msg.includes('rate limited') || msg.includes('504') || (err?.code === -32005) || (err?.code === -32020)) {
+              await new Promise(r => setTimeout(r, 400 * (attempt + 1)));
+              continue;
+            }
+            break;
+          }
+        }
+      }
+      const settlement = new ethers.Contract(settlementAddr!, SETTLEMENT_ABI, ro);
+      try {
+        const [total, available, locked] = await settlement.checkEscrowBalance(account, tokenAddress);
+        return { total, available, locked };
+      } catch (primaryErr) {
+        // Fallback to direct mapping reads if the helper view is absent/mismatched
+        const total: bigint = await settlement.escrowBalances(account, tokenAddress);
+        const locked: bigint = await settlement.lockedBalances(account, tokenAddress);
+        const available: bigint = total >= locked ? (total - locked) : 0n;
+        return { total, available, locked };
+      }
     } catch (error) {
       console.error('Escrow balance check error (readonly):', error);
       // Fallback to signer provider if readonly fails for any reason
       try {
         const settlement = await getSettlementContract(settlementAddr!);
-        const [total, available, locked] = await settlement.checkEscrowBalance(account, tokenAddress);
-        return { total, available, locked };
+        try {
+          const [total, available, locked] = await settlement.checkEscrowBalance(account, tokenAddress);
+          return { total, available, locked };
+        } catch (primaryErr) {
+          // Fallback to direct mapping reads with signer provider
+          const total: bigint = await settlement.escrowBalances(account, tokenAddress);
+          const locked: bigint = await settlement.lockedBalances(account, tokenAddress);
+          const available: bigint = total >= locked ? (total - locked) : 0n;
+          return { total, available, locked };
+        }
       } catch (e2) {
         console.error('Escrow balance check error (signer):', e2);
         throw e2;
@@ -469,21 +493,9 @@ export function useTrade() {
         receiptOk = await waitForReceipt(depositTx);
       }
 
-      // If waiting for receipt timed out, fall back to balance polling for up to 60s
-      if (!receiptOk) {
-        const decimals = await getTokenDecimals(tokenAddress);
-        const start = Date.now();
-        while (Date.now() - start < 60_000) {
-          try {
-            const b = await checkEscrowBalance(tokenAddress, settlementAddr, rpcOverride);
-            if (b.total >= parsedAmount) break;
-          } catch {}
-          await new Promise(r => setTimeout(r, 1500));
-        }
-      }
+      // Do not hard-fail if mirror node lags; the receipt confirms success
       console.log('Escrow deposit complete');
-
-      setState(prev => ({ ...prev, loading: false, orderStatus: 'completed' }));
+      // Leave loading/orderStatus control to the caller (submitOrder)
     } catch (error) {
       console.error('Escrow deposit error:', error);
       const hederaMsg = extractHederaErrorMessage(error);
