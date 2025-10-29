@@ -385,7 +385,7 @@ const TradingPanel = ({ account, onOrderSubmit, loading, fromNetwork, toNetwork,
             className="w-full"
             disabled={loading || !account || !price || !quantity}
             variant={side === 'buy' ? 'success' : 'destructive'}
-            onClick={handleSubmit}
+            onClick={() => {}}
           >
             {loading ? (
               <div className="flex items-center space-x-2">
@@ -464,16 +464,36 @@ const OrderHistoryPanel = ({ symbol }) => {
           {rows.length === 0 && !loading && (
             <div className="text-muted-foreground">No history yet</div>
           )}
-          {rows.map((r, i) => (
-            <div key={i} className="flex justify-between py-1 border-b border-border/40">
-              <span className="text-muted-foreground">{new Date(r.timestamp || Date.now()).toLocaleTimeString()}</span>
-              <span>{r.type}</span>
-              <span>{r.symbol}</span>
-              <span>{r.side || ''}</span>
-              <span>{r.price ? Number(r.price).toFixed(4) : ''}</span>
-              <span>{r.quantity || ''}</span>
-            </div>
-          ))}
+          {rows.map((r, i) => {
+            const short = (h?: string) => h ? `${h.substring(0, 10)}…${h.substring(h.length - 6)}` : '';
+            const hasTx = !!(r.txHash || r.txHashSource || r.txHashDestination);
+            return (
+              <div key={i} className="flex justify-between items-center py-1 border-b border-border/40 gap-2">
+                <span className="text-muted-foreground">{new Date(r.timestamp || Date.now()).toLocaleTimeString()}</span>
+                <span>{r.type}</span>
+                <span>{r.symbol}</span>
+                <span>{r.side || ''}</span>
+                <span>{r.price ? Number(r.price).toFixed(4) : ''}</span>
+                <span>{r.quantity || ''}</span>
+                {hasTx && (
+                  <span className="text-primary font-mono">
+                    {r.txHash ? (
+                      <a href={`https://hashscan.io/testnet/transaction/${r.txHash}`} target="_blank" rel="noreferrer">{short(r.txHash)}</a>
+                    ) : (
+                      <span className="flex gap-1">
+                        {r.txHashSource && (
+                          <a href={`https://hashscan.io/testnet/transaction/${r.txHashSource}`} target="_blank" rel="noreferrer">src:{short(r.txHashSource)}</a>
+                        )}
+                        {r.txHashDestination && (
+                          <a href={`https://hashscan.io/testnet/transaction/${r.txHashDestination}`} target="_blank" rel="noreferrer">dst:{short(r.txHashDestination)}</a>
+                        )}
+                      </span>
+                    )}
+                  </span>
+                )}
+              </div>
+            );
+          })}
           {loading && <div className="text-muted-foreground">Loading…</div>}
         </div>
       </CardContent>

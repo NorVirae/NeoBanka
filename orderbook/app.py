@@ -50,7 +50,7 @@ def append_activity_file(entry: dict):
 # Configuration - you should move these to environment variables
 # WEB3_PROVIDER = os.getenv("WEB3_PROVIDER", "https://your-ethereum-node.com")
 TRADE_SETTLEMENT_CONTRACT_ADDRESS = os.getenv(
-    "TRADE_SETTLE_CONTRACT_ADDRESS", "0x237458E2cF7593084Ae397a50166A275A3928bA7"
+    "TRADE_SETTLE_CONTRACT_ADDRESS_HEDERA", "0x237458E2cF7593084Ae397a50166A275A3928bA7"
 )
 
 # Supported networks mapping. Each entry contains the RPC URL, the numeric

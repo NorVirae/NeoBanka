@@ -83,10 +83,7 @@ describe("Cross-Chain Trade Settlement", function () {
 
     await tradeSettlement.connect(traderA).depositToEscrow(mockHBAR.target, QUANTITY);
     
-    // Manually lock the funds before settlement
-    const contractAddress = await tradeSettlement.getAddress();
-    const orderIdBytes32 = ethers.id(orderId);
-    await tradeSettlement.lockEscrowForOrder(traderA.address, mockHBAR.target, QUANTITY, orderIdBytes32);
+    // Auto-lock now happens inside settleCrossChainTrade
     
     const initialBalance = await mockHBAR.balanceOf(party2ReceiveWallet.address);
 
@@ -107,9 +104,7 @@ describe("Cross-Chain Trade Settlement", function () {
 
     await tradeSettlement.connect(traderB).depositToEscrow(mockUSDT.target, QUOTE_AMOUNT);
 
-    // Manually lock the funds before settlement
-    const orderIdBytes32 = ethers.id(orderId);
-    await tradeSettlement.lockEscrowForOrder(traderB.address, mockUSDT.target, QUOTE_AMOUNT, orderIdBytes32);
+    // Auto-lock now happens inside settleCrossChainTrade
 
     const initialBalance = await mockUSDT.balanceOf(party1ReceiveWallet.address);
 
@@ -121,6 +116,26 @@ describe("Cross-Chain Trade Settlement", function () {
     const [total, , locked] = await tradeSettlement.checkEscrowBalance(traderB.address, mockUSDT.target);
     expect(total).to.equal(0n);
     expect(locked).to.equal(0n);
+  });
+
+  it("3b. Should settle same-chain by transferring both legs in one tx", async function () {
+    const orderId = "order2b";
+    const timestamp = Math.floor(Date.now() / 1000);
+    const tradeData = createTradeData(orderId, timestamp);
+
+    // Deposit both legs to escrow
+    await tradeSettlement.connect(traderA).depositToEscrow(mockHBAR.target, QUANTITY);
+    await tradeSettlement.connect(traderB).depositToEscrow(mockUSDT.target, QUOTE_AMOUNT);
+
+    const baseBefore = await mockHBAR.balanceOf(party2ReceiveWallet.address);
+    const quoteBefore = await mockUSDT.balanceOf(party1ReceiveWallet.address);
+
+    await (tradeSettlement as any).settleSameChainTrade(tradeData);
+
+    const baseAfter = await mockHBAR.balanceOf(party2ReceiveWallet.address);
+    const quoteAfter = await mockUSDT.balanceOf(party1ReceiveWallet.address);
+    expect(baseAfter - baseBefore).to.equal(QUANTITY);
+    expect(quoteAfter - quoteBefore).to.equal(QUOTE_AMOUNT);
   });
 
   it("4. Should revert when non-owner tries to settle", async function () {
@@ -155,9 +170,7 @@ describe("Cross-Chain Trade Settlement", function () {
 
     await tradeSettlement.connect(traderA).depositToEscrow(mockHBAR.target, QUANTITY * 2n);
 
-    // Lock funds before first settlement
-    const orderIdBytes32 = ethers.id(orderId);
-    await tradeSettlement.lockEscrowForOrder(traderA.address, mockHBAR.target, QUANTITY, orderIdBytes32);
+    // Auto-lock will occur in the first settle
 
     await tradeSettlement.settleCrossChainTrade(tradeData, true);
 
@@ -166,7 +179,7 @@ describe("Cross-Chain Trade Settlement", function () {
     ).to.be.revertedWith("Order already settled on this chain");
   });
 
-  it("7. Should revert with insufficient locked balance", async function () {
+  it("7. Should revert with insufficient escrow to lock", async function () {
     const orderId = "order6";
     const timestamp = Math.floor(Date.now() / 1000);
     const tradeData = createTradeData(orderId, timestamp);
@@ -176,7 +189,7 @@ describe("Cross-Chain Trade Settlement", function () {
 
     await expect(
       tradeSettlement.settleCrossChainTrade(tradeData, true)
-    ).to.be.revertedWith("Insufficient locked base balance on source chain");
+    ).to.be.revertedWith("Insufficient escrow to lock (source)");
   });
 
   it("8. Should revert with invalid receive wallet", async function () {
