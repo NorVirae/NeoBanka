@@ -66,3 +66,31 @@
 {"type": "order_placed", "symbol": "HBAR_USDT", "orderId": 1, "account": "0x877664Ae1f1ca217977562A04592eCbCADb2Ca58", "side": "ask", "price": 0.1971, "quantity": 10.0, "timestamp": 1761736908475}
 {"type": "order_placed", "symbol": "HBAR_USDT", "orderId": 1, "account": "0x877664Ae1f1ca217977562A04592eCbCADb2Ca58", "side": "bid", "price": 0.1982, "quantity": 100.0, "timestamp": 1761737625708}
 {"type": "order_placed", "symbol": "HBAR_USDT", "orderId": 1, "account": "0xe0C12c21A66c75A70F02AEE12AC05636aE7fd0c0", "side": "ask", "price": 0.1985, "quantity": 10.0, "timestamp": 1761737704066}
+{"type": "order_placed", "symbol": "HBAR_USDT", "orderId": 1, "account": "0xe0C12c21A66c75A70F02AEE12AC05636aE7fd0c0", "side": "bid", "price": 0.1985, "quantity": 100.0, "timestamp": 1761738017282}
+{"type": "order_placed", "symbol": "HBAR_USDT", "orderId": 1, "account": "0x877664Ae1f1ca217977562A04592eCbCADb2Ca58", "side": "ask", "price": 0.1981, "quantity": 14.99, "timestamp": 1761738325049}
+{"type": "order_placed", "symbol": "HBAR_USDT", "orderId": 1, "account": "0x877664Ae1f1ca217977562A04592eCbCADb2Ca58", "side": "bid", "price": 0.2003, "quantity": 100.0, "timestamp": 1761740471228}
+{"type": "order_placed", "symbol": "HBAR_USDT", "orderId": 1, "account": "0xe0C12c21A66c75A70F02AEE12AC05636aE7fd0c0", "side": "ask", "price": 0.2009, "quantity": 30.0, "timestamp": 1761740560909}
+{"type": "order_placed", "symbol": "HBAR_USDT", "orderId": 1, "account": "0xe0C12c21A66c75A70F02AEE12AC05636aE7fd0c0", "side": "bid", "price": 0.2016, "quantity": 100.0, "timestamp": 1761741066917}
+{"type": "order_placed", "symbol": "HBAR_USDT", "orderId": 1, "account": "0x877664Ae1f1ca217977562A04592eCbCADb2Ca58", "side": "ask", "price": 0.2002, "quantity": 14.98, "timestamp": 1761741168981}
+{"type": "order_placed", "symbol": "HBAR_USDT", "orderId": 1, "account": "0x877664Ae1f1ca217977562A04592eCbCADb2Ca58", "side": "bid", "price": 0.202, "quantity": 100.02, "timestamp": 1761741697088}
+{"type": "order_placed", "symbol": "HBAR_USDT", "orderId": 1, "account": "0xe0C12c21A66c75A70F02AEE12AC05636aE7fd0c0", "side": "ask", "price": 0.2026, "quantity": 20.0, "timestamp": 1761741775654}
+{"type": "order_placed", "symbol": "HBAR_USDT", "orderId": 1, "account": "0xe0C12c21A66c75A70F02AEE12AC05636aE7fd0c0", "side": "bid", "price": 0.201, "quantity": 100.0, "timestamp": 1761742118328}
+{"type": "order_placed", "symbol": "HBAR_USDT", "orderId": 1, "account": "0x877664Ae1f1ca217977562A04592eCbCADb2Ca58", "side": "ask", "price": 0.2016, "quantity": 20.0, "timestamp": 1761742182467}
+{"type": "order_placed", "symbol": "HBAR_USDT", "orderId": 1, "account": "0x877664Ae1f1ca217977562A04592eCbCADb2Ca58", "side": "bid", "price": 0.2018, "quantity": 100.0, "timestamp": 1761744517573}
+{"type": "order_placed", "symbol": "HBAR_USDT", "orderId": 1, "account": "0xe0C12c21A66c75A70F02AEE12AC05636aE7fd0c0", "side": "ask", "price": 0.2016, "quantity": 20.0, "timestamp": 1761744722419}
+{"type": "order_placed", "symbol": "HBAR_USDT", "orderId": 1, "account": "0xe0C12c21A66c75A70F02AEE12AC05636aE7fd0c0", "side": "bid", "price": 0.2014, "quantity": 100.0, "timestamp": 1761745798435}
+{"type": "order_placed", "symbol": "HBAR_USDT", "orderId": 1, "account": "0x877664Ae1f1ca217977562A04592eCbCADb2Ca58", "side": "ask", "price": 0.2011, "quantity": 30.0, "timestamp": 1761745894237}
+{"type": "trade_executed", "symbol": "HBAR_USDT", "price": 0.2014, "quantity": 30.0, "timestamp": 1761745894237}
+{"type": "order_placed", "symbol": "HBAR_USDT", "orderId": 1, "account": "0x877664Ae1f1ca217977562A04592eCbCADb2Ca58", "side": "ask", "price": 0.2009, "quantity": 30.0, "timestamp": 1761746478417}
+{"type": "order_placed", "symbol": "HBAR_USDT", "orderId": 1, "account": "0x877664Ae1f1ca217977562A04592eCbCADb2Ca58", "side": "bid", "price": 0.2003, "quantity": 100.0, "timestamp": 1761747045248}
+{"type": "order_placed", "symbol": "HBAR_USDT", "orderId": 1, "account": "0xe0C12c21A66c75A70F02AEE12AC05636aE7fd0c0", "side": "ask", "price": 0.1998, "quantity": 20.0, "timestamp": 1761747173451}
+{"type": "order_placed", "symbol": "HBAR_USDT", "orderId": 1, "account": "0xe0C12c21A66c75A70F02AEE12AC05636aE7fd0c0", "side": "ask", "price": 0.1999, "quantity": 20.0, "timestamp": 1761747198176}
+{"type": "order_placed", "symbol": "HBAR_USDT", "orderId": 1, "account": "0x877664Ae1f1ca217977562A04592eCbCADb2Ca58", "side": "bid", "price": 0.2004, "quantity": 100.0, "timestamp": 1761747325092}
+{"type": "order_placed", "symbol": "HBAR_USDT", "orderId": 1, "account": "0xe0C12c21A66c75A70F02AEE12AC05636aE7fd0c0", "side": "ask", "price": 0.2007, "quantity": 19.98, "timestamp": 1761747351408}
+{"type": "order_placed", "symbol": "HBAR_USDT", "orderId": 1, "account": "0x877664Ae1f1ca217977562A04592eCbCADb2Ca58", "side": "bid", "price": 0.1999, "quantity": 100.0, "timestamp": 1761747708749}
+{"type": "order_placed", "symbol": "HBAR_USDT", "orderId": 1, "account": "0xe0C12c21A66c75A70F02AEE12AC05636aE7fd0c0", "side": "ask", "price": 0.2003, "quantity": 100.0, "timestamp": 1761747769860}
+{"type": "trade_executed", "symbol": "HBAR_USDT", "price": 0.1999, "quantity": 100.0, "timestamp": 1761747769860, "txHash": "609af5e1e43bb6b940bc94b2f6dea18f80512a7cdb3d2e30bdf4efed6ddced96", "txHashSource": "609af5e1e43bb6b940bc94b2f6dea18f80512a7cdb3d2e30bdf4efed6ddced96"}
+{"type": "order_placed", "symbol": "HBAR_USDT", "orderId": 1, "account": "0x877664Ae1f1ca217977562A04592eCbCADb2Ca58", "side": "ask", "price": 0.2001, "quantity": 300.0, "timestamp": 1761747930604}
+{"type": "order_placed", "symbol": "HBAR_USDT", "orderId": 4, "account": "0x877664Ae1f1ca217977562A04592eCbCADb2Ca58", "side": "ask", "price": 0.2002, "quantity": 300.0, "timestamp": 1761747950674}
+{"type": "order_placed", "symbol": "HBAR_USDT", "orderId": 1, "account": "0xe0C12c21A66c75A70F02AEE12AC05636aE7fd0c0", "side": "bid", "price": 0.2003, "quantity": 99.98, "timestamp": 1761748028629}
+{"type": "trade_executed", "symbol": "HBAR_USDT", "price": 0.2002, "quantity": 99.98, "timestamp": 1761748028629, "txHash": "896aa3ac55ce9869c507265efdd5e45c00aacbc2b567acaafc640ee6bee3646a", "txHashSource": "896aa3ac55ce9869c507265efdd5e45c00aacbc2b567acaafc640ee6bee3646a"}

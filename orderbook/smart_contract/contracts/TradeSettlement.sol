@@ -38,7 +38,10 @@ contract TradeSettlement is ReentrancyGuard, Ownable {
     // Escrow mappings
     mapping(address => mapping(address => uint256)) public escrowBalances;
     mapping(address => mapping(address => uint256)) public lockedBalances;
+    // Legacy lock flag (kept for backward compatibility, no longer used for enforcement)
     mapping(bytes32 => bool) public orderLocks;
+    // Chain-aware order lock to allow locking per leg (source/destination)
+    mapping(bytes32 => mapping(uint256 => bool)) public orderLocksByChain;
 
     // Cross-chain mappings
     mapping(bytes32 => bool) public settledCrossChainOrders;
@@ -158,7 +161,9 @@ contract TradeSettlement is ReentrancyGuard, Ownable {
         uint256 amount,
         bytes32 orderId
     ) external onlyOwner {
-        require(!orderLocks[orderId], "Order already locked");
+        // Allow one lock per chain for the same orderId
+        uint256 cid = block.chainid;
+        require(!orderLocksByChain[orderId][cid], "Order already locked on this chain");
 
         uint256 availableBalance = escrowBalances[user][token] -
             lockedBalances[user][token];
@@ -166,7 +171,7 @@ contract TradeSettlement is ReentrancyGuard, Ownable {
         require(availableBalance >= amount, "Insufficient escrow balance");
 
         lockedBalances[user][token] += amount;
-        orderLocks[orderId] = true;
+        orderLocksByChain[orderId][cid] = true;
 
         emit EscrowLocked(user, token, amount, orderId);
     }
@@ -190,6 +195,8 @@ contract TradeSettlement is ReentrancyGuard, Ownable {
         CrossChainTradeData memory tradeData,
         bool isSourceChain
     ) external nonReentrant onlyOwner {
+        // Lock required funds for this leg if not already locked on this chain
+        _ensureLockForCurrentChain(tradeData, isSourceChain);
         // Prevent replay attacks
         require(
             !settledCrossChainOrders[tradeData.orderId],
@@ -382,6 +389,167 @@ contract TradeSettlement is ReentrancyGuard, Ownable {
             amount,
             tradeData.destinationChainId,
             false,
+            block.timestamp
+        );
+    }
+
+    function _ensureLockForCurrentChain(
+        CrossChainTradeData memory tradeData,
+        bool isSourceChain
+    ) internal {
+        uint256 cid = block.chainid;
+        if (orderLocksByChain[tradeData.orderId][cid]) {
+            return; // already locked on this chain
+        }
+
+        if (isSourceChain) {
+            // party1 must be ask (selling base) on source chain
+            require(
+                keccak256(abi.encodePacked(tradeData.party1Side)) == keccak256(abi.encodePacked("ask")),
+                "Invalid source side"
+            );
+            uint256 amount = tradeData.quantity;
+            uint256 available = escrowBalances[tradeData.party1][tradeData.baseAsset] -
+                lockedBalances[tradeData.party1][tradeData.baseAsset];
+            require(available >= amount, "Insufficient escrow to lock (source)");
+            lockedBalances[tradeData.party1][tradeData.baseAsset] += amount;
+            orderLocksByChain[tradeData.orderId][cid] = true;
+            emit EscrowLocked(tradeData.party1, tradeData.baseAsset, amount, tradeData.orderId);
+        } else {
+            // party2 must be bid (buying base with quote) on destination chain
+            require(
+                keccak256(abi.encodePacked(tradeData.party2Side)) == keccak256(abi.encodePacked("bid")),
+                "Invalid dest side"
+            );
+            uint256 amount = (tradeData.quantity * tradeData.price) / 1e18;
+            uint256 available = escrowBalances[tradeData.party2][tradeData.quoteAsset] -
+                lockedBalances[tradeData.party2][tradeData.quoteAsset];
+            require(available >= amount, "Insufficient escrow to lock (dest)");
+            lockedBalances[tradeData.party2][tradeData.quoteAsset] += amount;
+            orderLocksByChain[tradeData.orderId][cid] = true;
+            emit EscrowLocked(tradeData.party2, tradeData.quoteAsset, amount, tradeData.orderId);
+        }
+    }
+
+    /**
+     * @dev Settle same-chain trade by locking and transferring both legs atomically on a single chain
+     */
+    function settleSameChainTrade(
+        CrossChainTradeData memory tradeData
+    ) external nonReentrant onlyOwner {
+        // Must be same chain for both legs
+        require(
+            tradeData.sourceChainId == tradeData.destinationChainId,
+            "Not same-chain trade"
+        );
+        require(block.chainid == tradeData.sourceChainId, "Wrong chain");
+
+        // Validate receive wallets
+        require(tradeData.party1ReceiveWallet != address(0), "Invalid party1 receive wallet");
+        require(tradeData.party2ReceiveWallet != address(0), "Invalid party2 receive wallet");
+
+        // Validate opposite sides
+        bool validSides = (
+            keccak256(abi.encodePacked(tradeData.party1Side)) == keccak256(abi.encodePacked("ask")) &&
+            keccak256(abi.encodePacked(tradeData.party2Side)) == keccak256(abi.encodePacked("bid"))
+        ) || (
+            keccak256(abi.encodePacked(tradeData.party1Side)) == keccak256(abi.encodePacked("bid")) &&
+            keccak256(abi.encodePacked(tradeData.party2Side)) == keccak256(abi.encodePacked("ask"))
+        );
+        require(validSides, "Parties must be on opposite sides");
+
+        // Prevent replay on this chain
+        require(!settledCrossChainOrders[tradeData.orderId], "Order already settled on this chain");
+
+        // Create unique trade hash
+        bytes32 tradeHash = keccak256(
+            abi.encodePacked(
+                tradeData.orderId,
+                tradeData.party1,
+                tradeData.party2,
+                tradeData.baseAsset,
+                tradeData.quoteAsset,
+                tradeData.price,
+                tradeData.quantity,
+                tradeData.sourceChainId,
+                tradeData.destinationChainId,
+                tradeData.timestamp
+            )
+        );
+        require(!executedTrades[tradeHash], "Trade already executed");
+        executedTrades[tradeHash] = true;
+
+        // Amounts
+        uint256 baseAmount = tradeData.quantity;
+        uint256 quoteAmount = (tradeData.quantity * tradeData.price) / 1e18;
+
+        // Lock both legs if not locked
+        if (keccak256(abi.encodePacked(tradeData.party1Side)) == keccak256(abi.encodePacked("ask"))) {
+            // party1 sells base, party2 buys with quote
+            _lockRequired(tradeData.party1, tradeData.baseAsset, baseAmount);
+            _lockRequired(tradeData.party2, tradeData.quoteAsset, quoteAmount);
+            // Transfers
+            _transferToken(tradeData.baseAsset, tradeData.party1, tradeData.party2ReceiveWallet, baseAmount, true);
+            _transferToken(tradeData.quoteAsset, tradeData.party2, tradeData.party1ReceiveWallet, quoteAmount, false);
+        } else {
+            // party1 buys base, party2 sells base
+            _lockRequired(tradeData.party2, tradeData.baseAsset, baseAmount);
+            _lockRequired(tradeData.party1, tradeData.quoteAsset, quoteAmount);
+            // Transfers
+            _transferToken(tradeData.baseAsset, tradeData.party2, tradeData.party1ReceiveWallet, baseAmount, true);
+            _transferToken(tradeData.quoteAsset, tradeData.party1, tradeData.party2ReceiveWallet, quoteAmount, false);
+        }
+
+        // Mark settled
+        settledCrossChainOrders[tradeData.orderId] = true;
+        uint256 currentChainId = block.chainid;
+        settlementByChain[tradeData.orderId][currentChainId] = true;
+        settlementStatuses[tradeData.orderId].sourceChainSettled = true;
+        settlementStatuses[tradeData.orderId].destinationChainSettled = true;
+        settlementStatuses[tradeData.orderId].sourceChainTimestamp = block.timestamp;
+        settlementStatuses[tradeData.orderId].destinationChainTimestamp = block.timestamp;
+
+        // Advance nonces
+        nonces[tradeData.party1][tradeData.baseAsset] = tradeData.nonce1 + 1;
+        nonces[tradeData.party2][tradeData.baseAsset] = tradeData.nonce2 + 1;
+    }
+
+    function _lockIfNeeded(bytes32 orderId, address user, address token, uint256 amount) internal {
+        uint256 cid = block.chainid;
+        if (!orderLocksByChain[orderId][cid]) {
+            uint256 available = escrowBalances[user][token] - lockedBalances[user][token];
+            require(available >= amount, "Insufficient escrow to lock (same)");
+            lockedBalances[user][token] += amount;
+            orderLocksByChain[orderId][cid] = true;
+            emit EscrowLocked(user, token, amount, orderId);
+        }
+    }
+
+    function _lockRequired(address user, address token, uint256 amount) internal {
+        uint256 available = escrowBalances[user][token] - lockedBalances[user][token];
+        require(available >= amount, "Insufficient escrow to lock");
+        lockedBalances[user][token] += amount;
+        emit EscrowLocked(0x0000000000000000000000000000000000000000, token, amount, bytes32(0));
+        // Note: orderId not known for generic lock here; event still indicates token/amount
+    }
+
+    function _transferToken(address token, address fromUser, address to, uint256 amount, bool isBase) internal {
+        // Reduce sender escrow and locked
+        require(lockedBalances[fromUser][token] >= amount, "Insufficient locked balance");
+        lockedBalances[fromUser][token] -= amount;
+        escrowBalances[fromUser][token] -= amount;
+
+        IERC20 tkn = IERC20(token);
+        require(tkn.transfer(to, amount), "Token transfer failed");
+
+        emit CrossChainTradeSettled(
+            0x0, // not indexing order id here since emitted twice already via lock events; kept minimal
+            fromUser,
+            to,
+            token,
+            amount,
+            block.chainid,
+            isBase,
             block.timestamp
         );
     }

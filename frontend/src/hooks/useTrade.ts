@@ -349,10 +349,11 @@ export function useTrade() {
         // No client-side signing required anymore; settlement is handled by backend/owner
         return { success: true, orderId, trades };
       } else {
-        // Surface backend validation details when available
+        // Surface backend validation and settlement details when available
         const details = (response as any)?.errors?.join?.(', ') || '';
         const extra = (response as any)?.validation_details ? ` | details: ${JSON.stringify((response as any).validation_details)}` : '';
-        throw new Error(`${response.message || 'Order submission failed'} ${details}${extra}`.trim());
+        const settle = (response as any)?.settlement_info ? ` | settlement: ${JSON.stringify((response as any).settlement_info)}` : '';
+        throw new Error(`${response.message || 'Order submission failed'} ${details}${extra}${settle}`.trim());
       }
 
     } catch (error) {

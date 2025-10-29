@@ -341,100 +341,71 @@ class APIHelper:
 
                 same_chain = source_chain_id == dest_chain_id
                 if same_chain:
-                    # Normalize roles so party1 is the seller (ask) on source chain
+                    # Use a per-trade unique order id to avoid replay reverts on same-chain
+                    base_order_id = str(order_dict["orderId"]).strip()
+                    unique_order_id = f"{base_order_id}:{idx}:{timestamp}"
+                    # Normalize so party1 is seller (ask) on same-chain to avoid owner-as-buyer requiring quote escrow
                     if str(party1_side).lower() == "bid" and str(party2_side).lower() == "ask":
                         party1_addr, party2_addr = party2_addr, party1_addr
                         party1_side, party2_side = party2_side, party1_side
                         party1_receive_wallet, party2_receive_wallet = party2_receive_wallet, party1_receive_wallet
                         nonce1, nonce2 = nonce2, nonce1
-                    logger.info(f"[{req_id}] Trade[{idx}] same-chain settlement on chain_id={source_chain_id}")
-                    # Ensure base funds are locked for seller on source chain
+                    logger.info(
+                        f"[{req_id}] Trade[{idx}] same-chain settlement on chain_id={source_chain_id} | "
+                        f"party1={party1_addr} side={party1_side} party2={party2_addr} side={party2_side}"
+                    )
+
+                    # Preflight escrow checks for clearer errors
                     try:
-                        base_dec = client_source.get_token_decimals(base_token_src)
-                    except Exception:
-                        base_dec = 18
-                    # Ensure sufficient locked balance before settlement
-                    # Lock with retries (rate-limit tolerant)
-                    lock_res = {"success": False}
-                    for a in range(3):
-                        try:
-                            lock_res = client_source.lock_escrow_for_order(
-                                party1_addr, base_token_src, float(quantity), order_id, token_decimals=base_dec
-                            )
-                            break
-                        except Exception as e:
-                            logger.warning(f"[{req_id}] Trade[{idx}] lock source base attempt {a+1} failed: {e}")
-                            await asyncio.sleep(0.75 * (a + 1))
-                    logger.info(f"[{req_id}] Trade[{idx}] lock source base result: {lock_res}")
-
-                    # Verify locked balance
-                    bal_info = client_source.check_escrow_balance(party1_addr, base_token_src, token_decimals=base_dec)
-                    if bal_info.get("locked", 0) < float(quantity):
-                        logger.warning(f"[{req_id}] Trade[{idx}] insufficient locked base after lock attempt | locked={bal_info.get('locked')} required={quantity}")
-                        settlement_results.append({
-                            "trade": trade,
-                            "settlement_result": {
-                                "success": False,
-                                "error": "insufficient_locked_base_on_source",
-                                "details": {
-                                    "locked": bal_info.get("locked"),
-                                    "required": float(quantity),
+                        base_needed = float(quantity)
+                        quote_needed = float(quantity) * float(price)
+                        base_check = client_source.check_escrow_balance(party1_addr if str(party1_side).lower()=="ask" else party2_addr, base_token_src, token_decimals=18)
+                        quote_check = client_source.check_escrow_balance(party2_addr if str(party1_side).lower()=="ask" else party1_addr, quote_token_src, token_decimals=18)
+                        base_avail = base_check.get("available", 0)
+                        quote_avail = quote_check.get("available", 0)
+                        if base_avail < base_needed:
+                            settlement_results.append({
+                                "trade": trade,
+                                "settlement_result": {
+                                    "success": False,
+                                    "error": "insufficient_escrow_base_same_chain",
+                                    "details": {"available": base_avail, "required": base_needed},
                                 }
-                            }
-                        })
-                        logger.info(f"[{req_id}] Trade[{idx}] done | ok_source=False ok_dest=False elapsed={time.time()-t0:.2f}s")
-                        continue
+                            })
+                            logger.info(f"[{req_id}] Trade[{idx}] done | ok_source=False ok_dest=True elapsed={time.time()-t0:.2f}s")
+                            continue
+                        if quote_avail < quote_needed:
+                            settlement_results.append({
+                                "trade": trade,
+                                "settlement_result": {
+                                    "success": False,
+                                    "error": "insufficient_escrow_quote_same_chain",
+                                    "details": {"available": quote_avail, "required": quote_needed},
+                                }
+                            })
+                            logger.info(f"[{req_id}] Trade[{idx}] done | ok_source=False ok_dest=True elapsed={time.time()-t0:.2f}s")
+                            continue
+                    except Exception:
+                        pass
 
-                    result_source = client_source.settle_cross_chain_trade(
-                        order_id, party1_addr, party2_addr,
+                    result_same = client_source.settle_same_chain_trade(
+                        unique_order_id, party1_addr, party2_addr,
                         party1_receive_wallet, party2_receive_wallet,
                         base_token_src, quote_token_src, price, quantity,
                         party1_side, party2_side,
                         source_chain_id, dest_chain_id,
                         timestamp, nonce1, nonce2,
-                        is_source_chain=True
                     )
-                    result_dest = {"success": True, "skipped": True, "reason": "same_chain_single_leg"}
+                    if not result_same.get("success"):
+                        logger.error(f"[{req_id}] Same-chain settlement failed | error={result_same.get('error')} diag={result_same.get('diagnostics')} chain={source_chain_id}")
+                    result_source = result_same
+                    result_dest = {"success": True, "skipped": True, "reason": "same_chain_atomic"}
                 else:
-                    # Settle on source chain (lock base funds for seller)
+                    # Settle on source chain (contract auto-locks)
                     logger.info(f"Settling on source chain (Chain ID: {source_chain_id})")
-                    logger.info(f"[{req_id}] Trade[{idx}] settle source chain")
-                    try:
-                        base_dec = client_source.get_token_decimals(base_token_src)
-                    except Exception:
-                        base_dec = 18
-                    # Lock with retries (rate-limit tolerant)
-                    lock_check_addr = party1_addr if str(party1_side).lower() == "ask" else party2_addr
-                    for a in range(3):
-                        try:
-                            if str(party1_side).lower() == "ask":
-                                client_source.lock_escrow_for_order(party1_addr, base_token_src, float(quantity), order_id, token_decimals=base_dec)
-                            else:
-                                # If party1 is bid on source chain, then party2 is seller for base
-                                client_source.lock_escrow_for_order(party2_addr, base_token_src, float(quantity), order_id, token_decimals=base_dec)
-                            break
-                        except Exception as e:
-                            logger.warning(f"[{req_id}] Trade[{idx}] lock source base attempt {a+1} failed: {e}")
-                            await asyncio.sleep(0.75 * (a + 1))
-
-                    # Verify locked balance on source
-                    bal_info_src = client_source.check_escrow_balance(lock_check_addr, base_token_src, token_decimals=base_dec)
-                    if bal_info_src.get("locked", 0) < float(quantity):
-                        logger.warning(f"[{req_id}] Trade[{idx}] insufficient locked base on source | locked={bal_info_src.get('locked')} required={quantity}")
-                        settlement_results.append({
-                            "trade": trade,
-                            "settlement_result": {
-                                "success": False,
-                                "error": "insufficient_locked_base_on_source",
-                                "details": {
-                                    "locked": bal_info_src.get("locked"),
-                                    "required": float(quantity),
-                                }
-                            }
-                        })
-                        logger.info(f"[{req_id}] Trade[{idx}] done | ok_source=False ok_dest=False elapsed={time.time()-t0:.2f}s")
-                        continue
-
+                    logger.info(
+                        f"[{req_id}] Trade[{idx}] settle source chain | party1={party1_addr} side={party1_side} party2={party2_addr} side={party2_side}"
+                    )
                     result_source = client_source.settle_cross_chain_trade(
                         order_id, party1_addr, party2_addr,
                         party1_receive_wallet, party2_receive_wallet,
@@ -444,41 +415,11 @@ class APIHelper:
                         timestamp, nonce1, nonce2,
                         is_source_chain=True
                     )
+                    if not result_source.get("success"):
+                        logger.error(f"[{req_id}] Source-chain settlement failed | error={result_source.get('error')} diag={result_source.get('diagnostics')} chain={source_chain_id}")
 
-                    # Settle on destination chain (lock quote funds for buyer)
+                    # Settle on destination chain (contract auto-locks)
                     logger.info(f"[{req_id}] Trade[{idx}] settle destination chain")
-                    try:
-                        quote_dec = client_dest.get_token_decimals(quote_token_dest)  # correct token decimals
-                    except Exception:
-                        quote_dec = 18
-                    # Compute quote amount in decimals of quote token
-                    amt = float(quantity) * float(price)
-                    # Lock with retries (rate-limit tolerant)
-                    for a in range(3):
-                        try:
-                            client_dest.lock_escrow_for_order(party2_addr, quote_token_dest, amt, order_id, token_decimals=quote_dec)
-                            break
-                        except Exception as e:
-                            logger.warning(f"[{req_id}] Trade[{idx}] lock dest quote attempt {a+1} failed: {e}")
-                            await asyncio.sleep(0.75 * (a + 1))
-
-                    # Verify locked balance on destination for quote
-                    bal_info_dest = client_dest.check_escrow_balance(party2_addr, quote_token_dest, token_decimals=quote_dec)
-                    if bal_info_dest.get("locked", 0) < float(amt):
-                        logger.warning(f"[{req_id}] Trade[{idx}] insufficient locked quote on destination | locked={bal_info_dest.get('locked')} required={amt}")
-                        settlement_results.append({
-                            "trade": trade,
-                            "settlement_result": {
-                                "success": False,
-                                "error": "insufficient_locked_quote_on_destination",
-                                "details": {
-                                    "locked": bal_info_dest.get("locked"),
-                                    "required": float(amt),
-                                }
-                            }
-                        })
-                        logger.info(f"[{req_id}] Trade[{idx}] done | ok_source={result_source.get('success')} ok_dest=False elapsed={time.time()-t0:.2f}s")
-                        continue
                     result_dest = client_dest.settle_cross_chain_trade(
                         order_id, party1_addr, party2_addr,
                         party1_receive_wallet, party2_receive_wallet,
@@ -488,6 +429,8 @@ class APIHelper:
                         timestamp, nonce1, nonce2,
                         is_source_chain=False
                     )
+                    if not result_dest.get("success"):
+                        logger.error(f"[{req_id}] Destination-chain settlement failed | error={result_dest.get('error')} diag={result_dest.get('diagnostics')} chain={dest_chain_id}")
 
                 settlement_results.append({
                     "trade": trade,

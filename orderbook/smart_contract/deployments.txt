@@ -1,13 +1,13 @@
-==================================================
 {
-  "network": "Hedera Tetstnet",
+  "network": "hedera testnet",
   "contract": "TradeSettlement",
-  "address": "0xB605031d2ba0Cf567DB8bdC56BD13b07d023c86E",
+  "address": "0xEBDe923E00809f9203256beBD59249df1c49Ec48",
   "deployer": "0x877664Ae1f1ca217977562A04592eCbCADb2Ca58",
-  "deploymentHash": "0x651285e8103c646136c2bb5b4c3ab10ef873f9d768b6048da53b68fb31e282f3",
-  "gasUsed": "1903963",
-  "timestamp": "2025-10-29T06:03:12.812Z"
+  "deploymentHash": "0x750a789438dd4345f4b371d6b123fd59614d2df97814443ce3b2ff47a70516e4",
+  "gasUsed": "2709725",
+  "timestamp": "2025-10-29T13:15:30.818Z"
 }
+==================================================
 HBAR deployed to: 0xA219e375D1F84A50273c93FaaF5EACD285bD9990
 USDT deployed to: 0x62bcF51859E23cc47ddc6C3144B045619476Be92
 
@@ -16,11 +16,11 @@ USDT deployed to: 0x62bcF51859E23cc47ddc6C3144B045619476Be92
 {
   "network": "polygon",
   "contract": "TradeSettlement",
-  "address": "0x419F4bd3E9A0429D6A7AB335A08cBE92Ead44CC2",
+  "address": "0x6dA8b46231081C2C66331AD7e6e751D4Cb4a81f7",
   "deployer": "0x877664Ae1f1ca217977562A04592eCbCADb2Ca58",
-  "deploymentHash": "0x198146a230ef28395179c5fbd93edf7926503b52dca63b2bd134894ecd9e1e9f",
-  "gasUsed": "1904493",
-  "timestamp": "2025-10-29T06:07:42.806Z"
+  "deploymentHash": "0x3a4124f9cf1c2c79d16e4944670bd692845ef6a2bd31ec9ec27f861be510bbfb",
+  "gasUsed": "2710489",
+  "timestamp": "2025-10-29T13:20:57.089Z"
 }
 HBAR deployed to: 0x41086d277f8A183A351310eC89d1AA9Dc1e67B7B
 USDT deployed to: 0x750702AA1dE631277576602b780A38790c36E19e

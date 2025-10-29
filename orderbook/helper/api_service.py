@@ -320,6 +320,11 @@ class APIService:
                     )
                     if not ok:
                         try:
+                            # Log full settlement info for debugging
+                            logger.error(f"Settlement failed | info={settlement_info}")
+                        except Exception:
+                            pass
+                        try:
                             # best-effort cancel of the just-placed order in the book
                             if order and order.get("order_id"):
                                 order_book.cancel_order(order.get("side"), order.get("order_id"))
@@ -347,6 +352,18 @@ class APIService:
                                     tr_ok = True
                                 if not tr_ok:
                                     continue
+                                # Attach transaction hashes for verification in history
+                                res_entry = {}
+                                try:
+                                    res_entry = (results[idx] or {}).get("settlement_result", {})
+                                except Exception:
+                                    res_entry = {}
+                                src = (res_entry.get("source_chain") or {})
+                                dst = (res_entry.get("destination_chain") or {})
+                                src_hash = src.get("transaction_hash")
+                                dst_hash = dst.get("transaction_hash")
+
+                                # Build record with optional tx hash fields; for same-chain we set txHash
                                 rec = {
                                     "type": "trade_executed",
                                     "symbol": symbol,
@@ -354,6 +371,12 @@ class APIService:
                                     "quantity": float(tr["quantity"]),
                                     "timestamp": int(tr["timestamp"]),
                                 }
+                                if src_hash and not dst_hash:
+                                    rec["txHash"] = src_hash
+                                if src_hash:
+                                    rec["txHashSource"] = src_hash
+                                if dst_hash:
+                                    rec["txHashDestination"] = dst_hash
                                 if activity_log is not None:
                                     activity_log.append(rec)
                                 if append_file is not None:
