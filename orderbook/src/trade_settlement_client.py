@@ -237,6 +237,18 @@ class SettlementClient:
 
     # ==================== TOKEN OPERATIONS ====================
 
+    def get_token_decimals(self, token_address: str) -> int:
+        """
+        Read ERC20 token decimals from chain. Falls back to 18 on error.
+        """
+        try:
+            token_contract = self.web3.eth.contract(
+                address=Web3.to_checksum_address(token_address), abi=ERC20_ABI
+            )
+            return int(token_contract.functions.decimals().call())
+        except Exception:
+            return 18
+
     def approve_token(
         self,
         token_address: str,
@@ -461,7 +473,8 @@ class SettlementClient:
                         ),
                         price_wei.to_bytes(32, "big"),
                         quantity_wei.to_bytes(32, "big"),
-                        Web3.keccak(text=side),
+                        # Solidity uses abi.encodePacked(string), so we must append raw UTF-8 bytes of the side string
+                        side.encode("utf-8"),
                         bytes.fromhex(
                             Web3.to_checksum_address(receive_wallet)[2:].zfill(40)
                         ),
@@ -607,9 +620,6 @@ class SettlementClient:
         timestamp: int,
         nonce1: int,
         nonce2: int,
-        signature1: str,
-        signature2: str,
-        matching_engine_signature: str,
         is_source_chain: bool,
         price_decimals: int = 18,
         quantity_decimals: int = 18,
@@ -687,11 +697,6 @@ class SettlementClient:
                 nonce2,
             )
 
-            # Convert signatures to bytes
-            sig1_bytes = bytes.fromhex(signature1.replace("0x", ""))
-            sig2_bytes = bytes.fromhex(signature2.replace("0x", ""))
-            me_sig_bytes = bytes.fromhex(matching_engine_signature.replace("0x", ""))
-
             print(f"\n{'='*60}")
             print(
                 f"🔄 Settling cross-chain trade on {'SOURCE' if is_source_chain else 'DESTINATION'} chain"
@@ -707,7 +712,7 @@ class SettlementClient:
 
             # Build transaction
             function = self.contract.functions.settleCrossChainTrade(
-                trade_data, sig1_bytes, sig2_bytes, me_sig_bytes, is_source_chain
+                trade_data, is_source_chain
             )
 
             # Estimate gas

@@ -62,6 +62,23 @@ export const orderbookApi = {
     });
     return await res.json();
   },
+  async settleTrades(payload: { order: any; trades: any[] }) {
+    const res = await fetch(`${ORDERBOOK_API_URL}/api/settle_trades`, {
+      method: 'POST',
+      headers: { 'Accept': 'application/json', 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+      credentials: 'include',
+    });
+    return await res.json();
+  },
+  async getSettlementAddress(): Promise<{ status_code: number; data?: { settlement_address: string } }> {
+    const res = await fetch(`${ORDERBOOK_API_URL}/api/get_settlement_address`, {
+      method: 'GET',
+      headers: { 'Accept': 'application/json' },
+      credentials: 'include',
+    });
+    return await res.json();
+  },
   async getOrderbook(symbol: string, fromNetwork?: string, toNetwork?: string) {
     const res = await fetch(`${ORDERBOOK_API_URL}/api/orderbook`, {
       method: 'POST',

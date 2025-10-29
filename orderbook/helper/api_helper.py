@@ -2,6 +2,7 @@ from fastapi import HTTPException, Request
 import json
 
 from dotenv import load_dotenv
+import asyncio
 
 # import asyncio
 import logging
@@ -101,8 +102,29 @@ class APIHelper:
                 PRIVATE_KEY,
             )
 
-            # Check escrow balance on that chain
-            balance_info = client.check_escrow_balance(account, token_to_check)
+            # Determine correct token decimals for accurate normalization with retries and sensible fallback
+            symbol_for_decimals = order_data["baseAsset"] if side.lower() == "ask" else order_data["quoteAsset"]
+            default_decimals_map = {"USDT": 6, "HBAR": 18}
+            token_decimals = default_decimals_map.get(symbol_for_decimals.upper(), 18)
+            for attempt in range(3):
+                try:
+                    token_decimals = client.get_token_decimals(token_to_check)
+                    break
+                except Exception:
+                    if attempt == 2:
+                        break
+                    await asyncio.sleep(0.5 * (attempt + 1))
+
+            # Check escrow balance on that chain with proper decimals, retry on transient RPC errors (e.g., 429)
+            balance_info = {}
+            for attempt in range(4):
+                try:
+                    balance_info = client.check_escrow_balance(account, token_to_check, token_decimals=token_decimals)
+                    if "error" not in balance_info:
+                        break
+                except Exception as e:
+                    balance_info = {"error": str(e)}
+                await asyncio.sleep(0.5 * (attempt + 1))
 
             available = balance_info.get("available", 0)
 
@@ -114,6 +136,10 @@ class APIHelper:
                 "available_escrow": available,
                 "total_escrow": balance_info.get("total", 0),
                 "locked_escrow": balance_info.get("locked", 0),
+                "network_key": network_key,
+                "rpc": net_cfg.get("rpc"),
+                "contract_address": net_cfg.get("contract_address"),
+                "token_decimals": token_decimals,
             }
 
             if available < required_amount:
@@ -243,13 +269,36 @@ class APIHelper:
                 client_dest = SettlementClient(dest_rpc, dest_contract, PRIVATE_KEY)
                 logger.info(f"[{req_id}] Trade[{idx}] clients ready | source_chain_id={source_chain_id} dest_chain_id={dest_chain_id}")
 
-                # Get token addresses
-                base_token = APIHelper.get_token_address(order_dict["baseAsset"], TOKEN_ADDRESSES)
-                quote_token = APIHelper.get_token_address(order_dict["quoteAsset"], TOKEN_ADDRESSES)
+                # Get token addresses for the source chain (party1_from_network)
+                base_token_src = APIHelper.get_token_address(
+                    order_dict["baseAsset"],
+                    party1_from_network,
+                    SUPPORTED_NETWORKS,
+                    TOKEN_ADDRESSES,
+                )
+                quote_token_src = APIHelper.get_token_address(
+                    order_dict["quoteAsset"],
+                    party1_from_network,
+                    SUPPORTED_NETWORKS,
+                    TOKEN_ADDRESSES,
+                )
+                # Get token addresses for the destination chain (party2_from_network)
+                base_token_dest = APIHelper.get_token_address(
+                    order_dict["baseAsset"],
+                    party2_from_network,
+                    SUPPORTED_NETWORKS,
+                    TOKEN_ADDRESSES,
+                )
+                quote_token_dest = APIHelper.get_token_address(
+                    order_dict["quoteAsset"],
+                    party2_from_network,
+                    SUPPORTED_NETWORKS,
+                    TOKEN_ADDRESSES,
+                )
 
                 # Get nonces
-                nonce1 = client_source.get_user_nonce(party1_addr, base_token)
-                nonce2 = client_dest.get_user_nonce(party2_addr, base_token)
+                nonce1 = client_source.get_user_nonce(party1_addr, base_token_src)
+                nonce2 = client_dest.get_user_nonce(party2_addr, base_token_dest)
                 logger.info(f"[{req_id}] Trade[{idx}] nonces | n1={nonce1} n2={nonce2}")
 
                 # Trade parameters
@@ -258,53 +307,7 @@ class APIHelper:
                 quantity = float(trade["quantity"])
                 timestamp = int(trade["timestamp"])
 
-                # Get or create signatures
-                sig1 = trade.get("signature1") or (trade["party1"][8] if len(trade["party1"]) > 8 else None)
-                sig2 = trade.get("signature2") or (trade["party2"][8] if len(trade["party2"]) > 8 else None)
-
-                # Create signatures if not provided (demo mode)
-                if not sig1:
-                    if REQUIRE_CLIENT_SIGNATURES:
-                        settlement_results.append({
-                            "trade": trade,
-                            "settlement_result": {"success": False, "error": "Missing client signature for party1"}
-                        })
-                        logger.warning(f"[{req_id}] Trade[{idx}] missing client signature party1")
-                        continue
-                    sig1 = client_source.create_trade_signature(
-                        party1_priv_key, order_id, base_token, quote_token,
-                        price, quantity, party1_side, party1_receive_wallet,
-                        source_chain_id, dest_chain_id, timestamp, nonce1
-                    )
-
-                if not sig2:
-                    if REQUIRE_CLIENT_SIGNATURES:
-                        settlement_results.append({
-                            "trade": trade,
-                            "settlement_result": {"success": False, "error": "Missing client signature for party2"}
-                        })
-                        logger.warning(f"[{req_id}] Trade[{idx}] missing client signature party2")
-                        continue
-                    sig2 = client_dest.create_trade_signature(
-                        party2_priv_key, order_id, base_token, quote_token,
-                        price, quantity, party2_side, party2_receive_wallet,
-                        source_chain_id, dest_chain_id, timestamp, nonce2
-                    )
-
-                # Create matching engine signatures for both chains
-                me_sig_source = client_source.create_matching_engine_signature(
-                    PRIVATE_KEY, order_id, party1_addr, party2_addr,
-                    party1_receive_wallet, party2_receive_wallet,
-                    base_token, quote_token, price, quantity,
-                    is_source_chain=True, chain_id=source_chain_id
-                )
-
-                me_sig_dest = client_dest.create_matching_engine_signature(
-                    PRIVATE_KEY, order_id, party1_addr, party2_addr,
-                    party1_receive_wallet, party2_receive_wallet,
-                    base_token, quote_token, price, quantity,
-                    is_source_chain=False, chain_id=dest_chain_id
-                )
+                # Signatures removed in contract; onlyOwner authorization controls settlement
 
                 same_chain = source_chain_id == dest_chain_id
                 if same_chain:
@@ -312,11 +315,11 @@ class APIHelper:
                     result_source = client_source.settle_cross_chain_trade(
                         order_id, party1_addr, party2_addr,
                         party1_receive_wallet, party2_receive_wallet,
-                        base_token, quote_token, price, quantity,
+                        base_token_src, quote_token_src, price, quantity,
                         party1_side, party2_side,
                         source_chain_id, dest_chain_id,
                         timestamp, nonce1, nonce2,
-                        sig1, sig2, me_sig_source, is_source_chain=True
+                        is_source_chain=True
                     )
                     result_dest = {"success": True, "skipped": True, "reason": "same_chain_single_leg"}
                 else:
@@ -326,11 +329,11 @@ class APIHelper:
                     result_source = client_source.settle_cross_chain_trade(
                         order_id, party1_addr, party2_addr,
                         party1_receive_wallet, party2_receive_wallet,
-                        base_token, quote_token, price, quantity,
+                        base_token_src, quote_token_src, price, quantity,
                         party1_side, party2_side,
                         source_chain_id, dest_chain_id,
                         timestamp, nonce1, nonce2,
-                        sig1, sig2, me_sig_source, is_source_chain=True
+                        is_source_chain=True
                     )
 
                     # Settle on destination chain
@@ -338,11 +341,11 @@ class APIHelper:
                     result_dest = client_dest.settle_cross_chain_trade(
                         order_id, party1_addr, party2_addr,
                         party1_receive_wallet, party2_receive_wallet,
-                        base_token, quote_token, price, quantity,
+                        base_token_dest, quote_token_dest, price, quantity,
                         party1_side, party2_side,
                         source_chain_id, dest_chain_id,
                         timestamp, nonce1, nonce2,
-                        sig1, sig2, me_sig_dest, is_source_chain=False
+                        is_source_chain=False
                     )
 
                 settlement_results.append({

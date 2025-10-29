@@ -61,45 +61,7 @@ describe("Cross-Chain Trade Settlement", function () {
     };
   }
 
-  async function signTrade(signer: SignerWithAddress, tradeData: any, receiveWallet: string, side: string) {
-    const messageHash = ethers.solidityPackedKeccak256(
-      ["bytes32", "address", "address", "uint256", "uint256", "string", "address", "uint256", "uint256", "uint256", "uint256"],
-      [
-        tradeData.orderId,
-        tradeData.baseAsset,
-        tradeData.quoteAsset,
-        tradeData.price,
-        tradeData.quantity,
-        side,
-        receiveWallet,
-        tradeData.sourceChainId,
-        tradeData.destinationChainId,
-        tradeData.timestamp,
-        side === "ask" ? tradeData.nonce1 : tradeData.nonce2
-      ]
-    );
-    return await signer.signMessage(ethers.getBytes(messageHash));
-  }
-
-  async function signMatchingEngine(tradeData: any, isSourceChain: boolean, chainId: bigint) {
-    const messageHash = ethers.solidityPackedKeccak256(
-      ["bytes32", "address", "address", "address", "address", "address", "address", "uint256", "uint256", "bool", "uint256"],
-      [
-        tradeData.orderId,
-        tradeData.party1,
-        tradeData.party2,
-        tradeData.party1ReceiveWallet,
-        tradeData.party2ReceiveWallet,
-        tradeData.baseAsset,
-        tradeData.quoteAsset,
-        tradeData.price,
-        tradeData.quantity,
-        isSourceChain,
-        chainId
-      ]
-    );
-    return await owner.signMessage(ethers.getBytes(messageHash));
-  }
+  // Signatures are no longer required
 
   it("1. Should deposit and lock funds for both traders", async function () {
     await tradeSettlement.connect(traderA).depositToEscrow(mockHBAR.target, QUANTITY);
@@ -126,13 +88,9 @@ describe("Cross-Chain Trade Settlement", function () {
     const orderIdBytes32 = ethers.id(orderId);
     await tradeSettlement.lockEscrowForOrder(traderA.address, mockHBAR.target, QUANTITY, orderIdBytes32);
     
-    const sig1 = await signTrade(traderA, tradeData, party1ReceiveWallet.address, "ask");
-    const sig2 = await signTrade(traderB, tradeData, party2ReceiveWallet.address, "bid");
-    const matchingSig = await signMatchingEngine(tradeData, true, CHAIN_A_ID);
-
     const initialBalance = await mockHBAR.balanceOf(party2ReceiveWallet.address);
 
-    await tradeSettlement.settleCrossChainTrade(tradeData, sig1, sig2, matchingSig, true);
+    await tradeSettlement.settleCrossChainTrade(tradeData, true);
 
     const finalBalance = await mockHBAR.balanceOf(party2ReceiveWallet.address);
     expect(finalBalance - initialBalance).to.equal(QUANTITY);
@@ -153,13 +111,9 @@ describe("Cross-Chain Trade Settlement", function () {
     const orderIdBytes32 = ethers.id(orderId);
     await tradeSettlement.lockEscrowForOrder(traderB.address, mockUSDT.target, QUOTE_AMOUNT, orderIdBytes32);
 
-    const sig1 = await signTrade(traderA, tradeData, party1ReceiveWallet.address, "ask");
-    const sig2 = await signTrade(traderB, tradeData, party2ReceiveWallet.address, "bid");
-    const matchingSig = await signMatchingEngine(tradeData, false, CHAIN_B_ID);
-
     const initialBalance = await mockUSDT.balanceOf(party1ReceiveWallet.address);
 
-    await tradeSettlement.settleCrossChainTrade(tradeData, sig1, sig2, matchingSig, false);
+    await tradeSettlement.settleCrossChainTrade(tradeData, false);
 
     const finalBalance = await mockUSDT.balanceOf(party1ReceiveWallet.address);
     expect(finalBalance - initialBalance).to.equal(QUOTE_AMOUNT);
@@ -169,37 +123,29 @@ describe("Cross-Chain Trade Settlement", function () {
     expect(locked).to.equal(0n);
   });
 
-  it("4. Should revert with invalid party1 signature", async function () {
+  it("4. Should revert when non-owner tries to settle", async function () {
     const orderId = "order3";
     const timestamp = Math.floor(Date.now() / 1000);
     const tradeData = createTradeData(orderId, timestamp);
 
     await tradeSettlement.connect(traderA).depositToEscrow(mockHBAR.target, QUANTITY);
 
-    const invalidSig1 = await signTrade(traderB, tradeData, party1ReceiveWallet.address, "ask");
-    const sig2 = await signTrade(traderB, tradeData, party2ReceiveWallet.address, "bid");
-    const matchingSig = await signMatchingEngine(tradeData, true, CHAIN_A_ID);
-
     await expect(
-      tradeSettlement.settleCrossChainTrade(tradeData, invalidSig1, sig2, matchingSig, true)
-    ).to.be.revertedWith("Invalid party1 signature");
+      tradeSettlement.connect(traderA).settleCrossChainTrade(tradeData, true)
+    ).to.be.revertedWithCustomError(tradeSettlement, "OwnableUnauthorizedAccount");
   });
 
-  it("5. Should revert with invalid matching engine signature", async function () {
+  it("5. Should revert on wrong chain id vs tradeData", async function () {
     const orderId = "order4";
     const timestamp = Math.floor(Date.now() / 1000);
     const tradeData = createTradeData(orderId, timestamp);
 
     await tradeSettlement.connect(traderA).depositToEscrow(mockHBAR.target, QUANTITY);
-
-    const sig1 = await signTrade(traderA, tradeData, party1ReceiveWallet.address, "ask");
-    const sig2 = await signTrade(traderB, tradeData, party2ReceiveWallet.address, "bid");
-    
-    const invalidMatchingSig = await signTrade(traderA, tradeData, party1ReceiveWallet.address, "ask");
-
+    // Flip source/destination to trigger chain check failure if isSourceChain flag doesn't match
+    tradeData.sourceChainId = 99999n;
     await expect(
-      tradeSettlement.settleCrossChainTrade(tradeData, sig1, sig2, invalidMatchingSig, true)
-    ).to.be.revertedWith("Invalid matching engine signature");
+      tradeSettlement.settleCrossChainTrade(tradeData, true)
+    ).to.be.revertedWith("Not source chain");
   });
 
   it("6. Should prevent replay attacks", async function () {
@@ -213,14 +159,10 @@ describe("Cross-Chain Trade Settlement", function () {
     const orderIdBytes32 = ethers.id(orderId);
     await tradeSettlement.lockEscrowForOrder(traderA.address, mockHBAR.target, QUANTITY, orderIdBytes32);
 
-    const sig1 = await signTrade(traderA, tradeData, party1ReceiveWallet.address, "ask");
-    const sig2 = await signTrade(traderB, tradeData, party2ReceiveWallet.address, "bid");
-    const matchingSig = await signMatchingEngine(tradeData, true, CHAIN_A_ID);
-
-    await tradeSettlement.settleCrossChainTrade(tradeData, sig1, sig2, matchingSig, true);
+    await tradeSettlement.settleCrossChainTrade(tradeData, true);
 
     await expect(
-      tradeSettlement.settleCrossChainTrade(tradeData, sig1, sig2, matchingSig, true)
+      tradeSettlement.settleCrossChainTrade(tradeData, true)
     ).to.be.revertedWith("Order already settled on this chain");
   });
 
@@ -232,12 +174,8 @@ describe("Cross-Chain Trade Settlement", function () {
     // Deposit less than required
     await tradeSettlement.connect(traderA).depositToEscrow(mockHBAR.target, QUANTITY / 2n);
 
-    const sig1 = await signTrade(traderA, tradeData, party1ReceiveWallet.address, "ask");
-    const sig2 = await signTrade(traderB, tradeData, party2ReceiveWallet.address, "bid");
-    const matchingSig = await signMatchingEngine(tradeData, true, CHAIN_A_ID);
-
     await expect(
-      tradeSettlement.settleCrossChainTrade(tradeData, sig1, sig2, matchingSig, true)
+      tradeSettlement.settleCrossChainTrade(tradeData, true)
     ).to.be.revertedWith("Insufficient locked base balance on source chain");
   });
 
@@ -249,12 +187,8 @@ describe("Cross-Chain Trade Settlement", function () {
 
     await tradeSettlement.connect(traderA).depositToEscrow(mockHBAR.target, QUANTITY);
 
-    const sig1 = await signTrade(traderA, tradeData, ethers.ZeroAddress, "ask");
-    const sig2 = await signTrade(traderB, tradeData, party2ReceiveWallet.address, "bid");
-    const matchingSig = await signMatchingEngine(tradeData, true, CHAIN_A_ID);
-
     await expect(
-      tradeSettlement.settleCrossChainTrade(tradeData, sig1, sig2, matchingSig, true)
+      tradeSettlement.settleCrossChainTrade(tradeData, true)
     ).to.be.revertedWith("Invalid party1 receive wallet");
   });
 
@@ -266,12 +200,8 @@ describe("Cross-Chain Trade Settlement", function () {
 
     await tradeSettlement.connect(traderA).depositToEscrow(mockHBAR.target, QUANTITY);
 
-    const sig1 = await signTrade(traderA, tradeData, party1ReceiveWallet.address, "ask");
-    const sig2 = await signTrade(traderB, tradeData, party2ReceiveWallet.address, "ask");
-    const matchingSig = await signMatchingEngine(tradeData, true, CHAIN_A_ID);
-
     await expect(
-      tradeSettlement.settleCrossChainTrade(tradeData, sig1, sig2, matchingSig, true)
+      tradeSettlement.settleCrossChainTrade(tradeData, true)
     ).to.be.revertedWith("Parties must be on opposite sides");
   });
 
