@@ -38,6 +38,7 @@ load_dotenv()
 order_books = {}  # Dictionary to store multiple order books, keyed by symbol
 activity_log = deque(maxlen=1000)
 ACTIVITY_LOG_PATH = os.getenv("ACTIVITY_LOG_PATH", "orderbook_activity.jsonl")
+order_signatures = {}
 
 def append_activity_file(entry: dict):
     try:
@@ -195,6 +196,7 @@ async def register_order(request: Request):
         activity_log=activity_log,
         activity_file_path=ACTIVITY_LOG_PATH,
         append_file=append_activity_file,
+        order_signatures=order_signatures,
     )
 
 
@@ -302,6 +304,19 @@ async def settlement_health():
     return await api_service.settlement_health(
         settlement_client=settlement_client,
         TRADE_SETTLEMENT_CONTRACT_ADDRESS=TRADE_SETTLEMENT_CONTRACT_ADDRESS,
+    )
+
+
+@app.post("/api/settle_trades")
+async def settle_trades(request: Request):
+    return await api_service.settle_trades(
+        request=request,
+        SUPPORTED_NETWORKS=SUPPORTED_NETWORKS,
+        TRADE_SETTLEMENT_CONTRACT_ADDRESS=TRADE_SETTLEMENT_CONTRACT_ADDRESS,
+        CONTRACT_ABI=CONTRACT_ABI,
+        PRIVATE_KEY=PRIVATE_KEY,
+        TOKEN_ADDRESSES=TOKEN_ADDRESSES,
+        settlement_client=settlement_client,
     )
 
 

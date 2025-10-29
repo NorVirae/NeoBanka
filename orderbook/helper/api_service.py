@@ -65,10 +65,27 @@ class APIService:
         activity_log=None,
         activity_file_path: str | None = None,
         append_file=None,
+        order_signatures: dict | None = None,
     ):
         logger.info("GOT HERE")
         try:
             payload_json = await APIHelper.handlePayloadJson(request)
+
+            # Signature attach path: allow client to POST signature after orderId is known
+            if payload_json.get("attach_signature"):
+                try:
+                    order_id = str(payload_json["orderId"]).strip()
+                    signer = str(payload_json["account"]).lower().strip()
+                    signature = str(payload_json["signature"]).strip()
+                    if not order_id or not signer or not signature:
+                        return JSONResponse(content={"message": "Missing orderId/account/signature", "status_code": 0}, status_code=400)
+                    if order_signatures is not None:
+                        if order_id not in order_signatures:
+                            order_signatures[order_id] = {}
+                        order_signatures[order_id][signer] = signature
+                    return JSONResponse(content={"message": "Signature attached", "status_code": 1})
+                except Exception as e:
+                    return JSONResponse(content={"message": f"Attach failed: {e}", "status_code": 0}, status_code=400)
 
             # payload_json = json.loads(payload)
             symbol = "%s_%s" % (payload_json["baseAsset"], payload_json["quoteAsset"])
@@ -115,7 +132,8 @@ class APIService:
                 "side": payload_json["side"],
                 "baseAsset": payload_json["baseAsset"],
                 "quoteAsset": payload_json["quoteAsset"],
-                "private_key": payload_json["privateKey"],
+                # Optional; frontend no longer sends user private key. Keep None/empty for demo auto-sign.
+                "private_key": payload_json.get("privateKey") or payload_json.get("private_key") or None,
             }
 
             process_result = order_book.process_order(_order, False, False)
@@ -137,6 +155,9 @@ class APIService:
 
             # Convert trades to the expected format
             converted_trades = []
+            # Optional client-provided signatures for demo/frontend signing
+            client_sig1 = payload_json.get("signature1") or payload_json.get("signature_1")
+            client_sig2 = payload_json.get("signature2") or payload_json.get("signature_2")
             for trade in trades:
                 party1 = [
                     trade["party1"][0],
@@ -180,7 +201,21 @@ class APIService:
                     "time": int(trade["time"]),
                     "party1": party1,
                     "party2": party2,
+                    # Pass through client signatures if present (applied for all trades in this order)
+                    **({"signature1": client_sig1} if client_sig1 else {}),
+                    **({"signature2": client_sig2} if client_sig2 else {}),
                 }
+                # Overlay stored signatures by signer address if present
+                try:
+                    stored = (order_signatures or {}).get(str((order or {}).get("order_id")), {})
+                    sig_p1 = stored.get(str(party1[0]).lower())
+                    sig_p2 = stored.get(str(party2[0]).lower())
+                    if sig_p1 and not converted_trade.get("signature1"):
+                        converted_trade["signature1"] = sig_p1
+                    if sig_p2 and not converted_trade.get("signature2"):
+                        converted_trade["signature2"] = sig_p2
+                except Exception:
+                    pass
                 converted_trades.append(converted_trade)
 
             # Convert order to a serializable format
@@ -235,7 +270,8 @@ class APIService:
 
             # Step 3: Settle trades if any exist (async by default)
             settlement_info = {"settled": False}
-            if converted_trades:
+            has_any_sig = any(t.get("signature1") or t.get("signature2") for t in converted_trades)
+            if converted_trades and has_any_sig:
                 logger.info(f"Attempting to settle {len(converted_trades)} trade(s)")
                 try:
                     sync_flag = os.getenv("SETTLEMENT_SYNC", "false").lower() in ("1", "true", "yes")
@@ -244,6 +280,7 @@ class APIService:
                     async def _run_settlement_offthread():
                         loop = asyncio.get_running_loop()
                         def runner():
+                            require_clients = os.getenv("REQUIRE_CLIENT_SIGNATURES", "false").lower() in ("1", "true", "yes")
                             return asyncio.run(
                                 APIHelper.settle_trades_if_any(
                                     order_dict,
@@ -252,7 +289,8 @@ class APIService:
                                     CONTRACT_ABI,
                                     PRIVATE_KEY,
                                     TOKEN_ADDRESSES,
-                                    REQUIRE_CLIENT_SIGNATURES=True,
+                                    settlement_client,
+                                    REQUIRE_CLIENT_SIGNATURES=require_clients,
                                 )
                             )
                         return await loop.run_in_executor(None, runner)
@@ -289,6 +327,9 @@ class APIService:
                 except Exception:
                     pass
 
+            if converted_trades and not has_any_sig:
+                settlement_info = {"settled": False, "reason": "awaiting_client_signatures"}
+                logger.info("Order registered; skipping settlement until client signatures are provided")
             logger.info(
                 f"Order processed successfully with {len(converted_trades)} trades"
             )
@@ -480,6 +521,46 @@ class APIService:
                 }
             )
         except Exception as e:
+            raise HTTPException(status_code=500, detail=str(e))
+
+    async def settle_trades(self, request: Request, SUPPORTED_NETWORKS, TRADE_SETTLEMENT_CONTRACT_ADDRESS, CONTRACT_ABI, PRIVATE_KEY, TOKEN_ADDRESSES, settlement_client):
+        try:
+            payload_json = await APIHelper.handlePayloadJson(request)
+
+            # Accept either a full order_dict or separate fields
+            order_dict = payload_json.get("order") or {}
+            if not order_dict:
+                raise HTTPException(status_code=422, detail="Missing 'order' in payload")
+
+            trades = payload_json.get("trades")
+            if trades is None:
+                trades = order_dict.get("trades")
+            if not isinstance(trades, list):
+                trades = []
+            order_dict["trades"] = trades
+
+            # Trigger settlement
+            settlement_info = await APIHelper.settle_trades_if_any(
+                order_dict,
+                SUPPORTED_NETWORKS,
+                TRADE_SETTLEMENT_CONTRACT_ADDRESS,
+                CONTRACT_ABI,
+                PRIVATE_KEY,
+                TOKEN_ADDRESSES,
+                settlement_client,
+                REQUIRE_CLIENT_SIGNATURES=os.getenv("REQUIRE_CLIENT_SIGNATURES", "false").lower() in ("1", "true", "yes"),
+            )
+
+            return JSONResponse(
+                content={
+                    "message": "Settlement processed",
+                    "orderId": order_dict.get("orderId"),
+                    "settlement_info": settlement_info,
+                    "status_code": 1,
+                }
+            )
+        except Exception as e:
+            logger.error(f"Error in settle_trades: {e}")
             raise HTTPException(status_code=500, detail=str(e))
 
     def get_settlement_address(self, TRADE_SETTLEMENT_CONTRACT_ADDRESS):

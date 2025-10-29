@@ -179,59 +179,51 @@ export function useTrade() {
       const amountStr = typeof amount === 'number' ? amount.toString() : amount;
       const requiredAmount = ethers.parseUnits(amountStr, decimals);
 
-      let hadAllowanceInfo = false;
       try {
         const allowanceTarget = settlementAddrOverride!;
         const currentAllowance: bigint = await token.allowance(account, allowanceTarget);
-        hadAllowanceInfo = true;
         if (currentAllowance >= requiredAmount) {
           return true;
         }
 
         setState(prev => ({ ...prev, orderStatus: 'approving' }));
-        if (currentAllowance > 0n) {
-          try {
-            const resetTx = await token.approve(allowanceTarget, 0, { gasLimit: 100000, gasPrice: ethers.parseUnits('1', 'gwei') });
-            await resetTx.wait();
-          } catch (e: any) {
-            // Retry without explicit gasPrice
-            const resetTx = await token.approve(allowanceTarget, 0, { gasLimit: 100000 });
-            await resetTx.wait();
-          }
-        }
+
+        // Try direct approve first (most ERC20s allow updating without zeroing)
         try {
-          const approveTx = await token.approve(allowanceTarget, requiredAmount, { gasLimit: 150000, gasPrice: ethers.parseUnits('1', 'gwei') });
-          await approveTx.wait();
-        } catch (e: any) {
-          // Retry without explicit gasPrice if RPC rejects
           const approveTx = await token.approve(allowanceTarget, requiredAmount, { gasLimit: 150000 });
           await approveTx.wait();
+          return true;
+        } catch (directErr) {
+          console.warn('Direct approve failed, attempting zero-approve then approve', directErr);
+          try {
+            const resetTx = await token.approve(allowanceTarget, 0, { gasLimit: 100000 });
+            await resetTx.wait();
+          } catch (resetErr) {
+            console.warn('Zero-approve failed or unnecessary, continuing', resetErr);
+          }
+          const approveTx = await token.approve(allowanceTarget, requiredAmount, { gasLimit: 150000 });
+          await approveTx.wait();
+          return true;
         }
-        return true;
       } catch (allowanceErr) {
-        console.warn('allowance() call failed; falling back to blind approval flow', allowanceErr);
-        // Fallback: attempt zero-approve then max-approve without knowing current allowance
+        console.warn('allowance() call failed; performing blind approve flow', allowanceErr);
         setState(prev => ({ ...prev, orderStatus: 'approving' }));
         try {
-          try {
-            const resetTx = await token.approve(settlementAddrOverride!, 0, { gasLimit: 100000, gasPrice: ethers.parseUnits('1', 'gwei') });
-            await resetTx.wait();
-          } catch {
-            const resetTx = await token.approve(settlementAddrOverride!, 0, { gasLimit: 100000 });
-            await resetTx.wait();
-          }
-        } catch (resetErr) {
-          // It's OK if reset fails when current allowance is already zero; continue to max-approve
-          console.warn('zero-approve failed or unnecessary, continuing to max-approve', resetErr);
-        }
-        try {
-          const approveTx = await token.approve(settlementAddrOverride!, requiredAmount, { gasLimit: 150000, gasPrice: ethers.parseUnits('1', 'gwei') });
-          await approveTx.wait();
-        } catch {
           const approveTx = await token.approve(settlementAddrOverride!, requiredAmount, { gasLimit: 150000 });
           await approveTx.wait();
+          return true;
+        } catch (directErr) {
+          console.warn('Blind direct approve failed, attempting zero-approve then approve', directErr);
+          try {
+            const resetTx = await token.approve(settlementAddrOverride!, 0, { gasLimit: 100000 });
+            await resetTx.wait();
+          } catch (resetErr) {
+            console.warn('Zero-approve failed or unnecessary, continuing', resetErr);
+          }
+          const approveTx = await token.approve(settlementAddrOverride!, requiredAmount, { gasLimit: 150000 });
+          await approveTx.wait();
+          return true;
         }
-        return true;
       }
     } catch (error) {
       console.error('Approval error:', error);
@@ -260,6 +252,19 @@ export function useTrade() {
       if (!settlementAddr) throw new Error(`Settlement address not set for ${escrowNetKey}`);
       await ensureSufficientHbar();
       await ensureNetwork(escrowChain.chainId);
+      console.log('Network + settlement used:', { escrowNetKey, chainId: escrowChain.chainId, settlementAddr, baseTokenAddress, quoteTokenAddress });
+
+      // Verify backend and frontend use the same settlement address
+      try {
+        const backendAddrResp = await orderbookApi.getSettlementAddress();
+        const backendAddr = (backendAddrResp?.data?.settlement_address || '').toLowerCase();
+        if (backendAddr && backendAddr !== settlementAddr.toLowerCase()) {
+          throw new Error(`Settlement address mismatch between frontend (${settlementAddr}) and backend (${backendAddr}). Please align envs.`);
+        }
+      } catch (e) {
+        // Non-fatal; continue but log for visibility
+        console.warn('Failed to verify backend settlement address', e);
+      }
       
       // Normalize numeric fields to strings for safe unit parsing
       const priceStr: string = typeof (orderData as any).price === 'number' ? String((orderData as any).price) : String((orderData as any).price);
@@ -277,9 +282,8 @@ export function useTrade() {
         amount: amountToUse
       });
 
-      // Step 1: Check and approve token to settlement contract
-      console.log('Step 1: Checking and approving token...');
-      await checkAndApproveToken(tokenToUse, amountToUse, settlementAddr);
+      // Step 1: Approval will be ensured during deposit only if needed
+      console.log('Step 1: Skipping upfront approval (will ensure during deposit if needed)');
 
       // Step 2: Check escrow balance
       console.log('Step 2: Checking escrow balance...');
@@ -292,18 +296,38 @@ export function useTrade() {
         required: amountToUse
       });
 
-      // Step 3: Deposit to escrow if needed
+      // Step 3: Deposit to escrow if needed (this will also ensure approval if required)
       if (escrowBalance.available < requiredAmount) {
         const needed = requiredAmount - escrowBalance.available;
         const neededFormatted = ethers.formatUnits(needed, decimals);
         console.log(`Step 3: Depositing ${neededFormatted} to escrow...`);
         await depositToEscrow(tokenToUse, neededFormatted, settlementAddr, escrowChain.rpc);
+        // After deposit, poll escrow until funds are visible or timeout
+        const maxWaitMs = 30000;
+        const start = Date.now();
+        let lastAvailable = escrowBalance.available;
+        while (Date.now() - start < maxWaitMs) {
+          try {
+            const b = await checkEscrowBalance(tokenToUse, settlementAddr, escrowChain.rpc);
+            lastAvailable = b.available;
+            if (lastAvailable >= requiredAmount) break;
+          } catch (e) {
+            // ignore transient errors
+          }
+          // Exponential backoff up to ~2s
+          const elapsed = Date.now() - start;
+          const sleepMs = Math.min(2000, 250 + Math.floor(elapsed / 4));
+          await new Promise(r => setTimeout(r, sleepMs));
+        }
+        if (lastAvailable < requiredAmount) {
+          throw new Error('Escrow not updated yet. Please try again in a few seconds.');
+        }
       } else {
         console.log('Step 3: Sufficient escrow balance, skipping deposit');
       }
 
-      // Step 4: Create and sign order
-      console.log('Step 4: Creating and signing order...');
+      // Step 4: Prepare order for submission (signing done after register when we have exact trade fields)
+      console.log('Step 4: Preparing order payload...');
       const currentChainId = Number((await provider.getNetwork()).chainId);
       const timestamp = Math.floor(Date.now() / 1000);
       
@@ -329,7 +353,6 @@ export function useTrade() {
         // @ts-ignore
         to_network: orderData.toNetwork,
         receiveWallet: orderData.receiveWallet,
-        privateKey: '', // Not exposing private keys to backend
       };
 
       console.log('Step 5: Submitting order to orderbook...');
@@ -338,11 +361,10 @@ export function useTrade() {
       if (response.status_code === 1) {
         console.log('Order submitted successfully!');
         setState(prev => ({ ...prev, orderStatus: 'completed', loading: false }));
-        return {
-          success: true,
-          orderId: response.order.orderId,
-          trades: response.order.trades || []
-        };
+        const orderId = response.order.orderId;
+        const trades = response.order.trades || [];
+        // No client-side signing required anymore; settlement is handled by backend/owner
+        return { success: true, orderId, trades };
       } else {
         // Surface backend validation details when available
         const details = (response as any)?.errors?.join?.(', ') || '';
@@ -428,34 +450,36 @@ export function useTrade() {
         const hederaMsg = extractHederaErrorMessage(simErr);
         if (hederaMsg) throw new Error(hederaMsg);
       }
-      const ro = rpcOverride ? new ethers.JsonRpcProvider(rpcOverride) : readonlyProvider;
-      const waitWithRetry = async (txHash: string, maxRetries = 6) => {
-        let attempt = 0;
-        // eslint-disable-next-line no-constant-condition
-        while (true) {
-          try {
-            // 2 min timeout per attempt
-            await ro.waitForTransaction(txHash, 1, 120_000);
-            return;
-          } catch (err: any) {
-            const msg = String(err?.message || '');
-            const code = (err?.code ?? '').toString();
-            const isCircuit = code === '-32603' || msg.includes('circuit breaker');
-            if (!isCircuit || attempt >= maxRetries) throw err;
-            // exponential backoff 1s, 2s, 4s, ... up to ~64s
-            const delayMs = 1000 * Math.pow(2, attempt);
-            await new Promise(r => setTimeout(r, delayMs));
-            attempt += 1;
-          }
+      const waitForReceipt = async (tx: ethers.TransactionResponse) => {
+        try {
+          // Prefer wallet provider's wait which internally polls receipt
+          await tx.wait();
+          return true;
+        } catch (e) {
+          return false;
         }
       };
 
+      let receiptOk = false;
       try {
         const depositTx = await settlement.depositToEscrow(tokenAddress, parsedAmount, { gasLimit: 300000, gasPrice: ethers.parseUnits('1', 'gwei') });
-        await waitWithRetry(depositTx.hash as string);
+        receiptOk = await waitForReceipt(depositTx);
       } catch (e: any) {
         const depositTx = await settlement.depositToEscrow(tokenAddress, parsedAmount, { gasLimit: 300000 });
-        await waitWithRetry(depositTx.hash as string);
+        receiptOk = await waitForReceipt(depositTx);
+      }
+
+      // If waiting for receipt timed out, fall back to balance polling for up to 60s
+      if (!receiptOk) {
+        const decimals = await getTokenDecimals(tokenAddress);
+        const start = Date.now();
+        while (Date.now() - start < 60_000) {
+          try {
+            const b = await checkEscrowBalance(tokenAddress, settlementAddr, rpcOverride);
+            if (b.total >= parsedAmount) break;
+          } catch {}
+          await new Promise(r => setTimeout(r, 1500));
+        }
       }
       console.log('Escrow deposit complete');
 

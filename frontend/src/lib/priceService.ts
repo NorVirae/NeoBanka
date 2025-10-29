@@ -58,21 +58,19 @@ class PriceService {
 
       if (!response.ok) {
         console.warn(`Failed to fetch price for ${symbol}: ${response.status}`);
-        // Return a default/mock price if Gate.io doesn't have the pair
-        if (response.status === 404 || response.status === 400) {
-          return this.getMockPrice(symbol);
-        }
-        return null;
+        // Fallback to mock price when proxy fails
+        return this.getMockPrice(symbol);
       }
 
-      const data = await response.json() as GateIOTicker[];
+      const data = await response.json() as any;
+      const arr = Array.isArray(data) ? (data as GateIOTicker[]) : [];
       
-      if (!data || data.length === 0) {
+      if (!arr || arr.length === 0 || !arr[0] || typeof arr[0].last === 'undefined') {
         console.warn(`No price data for ${symbol}, using mock price`);
         return this.getMockPrice(symbol);
       }
 
-      const ticker = data[0];
+      const ticker = arr[0];
       
       const priceData: PriceData = {
         pair: symbol,
@@ -189,15 +187,13 @@ class PriceService {
       let raw: any = null;
       try { raw = await resp.json(); } catch {}
 
-      // Fallback: direct Gate.io if proxy unavailable or returned error
+      // If proxy failed, skip direct Gate.io fallback and synthesize later
       if (!resp.ok || (raw && (raw.error || raw.message))) {
-        const direct = `https://api.gateio.ws/api/v4/spot/candlesticks?currency_pair=${gateSymbol}&interval=${interval}&limit=${limit}`;
-        resp = await fetch(direct, { headers: { Accept: 'application/json' } });
-        if (!resp.ok) throw new Error(`kline ${resp.status}`);
-        raw = await resp.json();
+        raw = [];
       }
-      // Gate.io returns array of arrays strings: [t, v, c, h, l, o]
-      const candles = (raw as any[]).map((r: any[]) => {
+      // Ensure array before mapping. Gate.io returns array of arrays strings: [t, v, c, h, l, o]
+      const rawArr = Array.isArray(raw) ? raw as any[] : [];
+      const candles = rawArr.map((r: any[]) => {
         const t = Number(r[0]) * 1000; // millis
         return {
           time: t,
@@ -221,8 +217,18 @@ class PriceService {
       });
       return synth;
     } catch (e) {
-      console.warn('candles fallback', e);
-      return [];
+      console.warn('candles fallback, generating synthetic series', e);
+      // Fallback to synthetic candles using mock price
+      const base = (await this.fetchPrice(symbol))?.price || 1;
+      const now = Date.now();
+      return Array.from({ length: 30 }).map((_, i) => {
+        const t = now - (30 - i) * 60 * 60 * 1000;
+        const o = base * (1 + (Math.random() - 0.5) * 0.02);
+        const c = o * (1 + (Math.random() - 0.5) * 0.01);
+        const h = Math.max(o, c) * (1 + Math.random() * 0.01);
+        const l = Math.min(o, c) * (1 - Math.random() * 0.01);
+        return { time: t, open: o, high: h, low: l, close: c };
+      });
     }
   }
 

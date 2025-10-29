@@ -2,15 +2,11 @@
 pragma solidity ^0.8.28;
 
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
-import "@openzeppelin/contracts/utils/cryptography/ECDSA.sol";
 import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 import "@openzeppelin/contracts/access/Ownable.sol";
-import "@openzeppelin/contracts/utils/cryptography/MessageHashUtils.sol";
 // import "hardhat/console.sol";
 
 contract TradeSettlement is ReentrancyGuard, Ownable {
-    using ECDSA for bytes32;
-    using MessageHashUtils for bytes32;
 
     struct CrossChainTradeData {
         bytes32 orderId;
@@ -175,45 +171,7 @@ contract TradeSettlement is ReentrancyGuard, Ownable {
         emit EscrowLocked(user, token, amount, orderId);
     }
 
-    /**
-     * @dev Verify cross-chain trade signature
-     */
-    function verifyCrossChainTradeSignature(
-        address signer,
-        bytes32 orderId,
-        address baseAsset,
-        address quoteAsset,
-        uint256 price,
-        uint256 quantity,
-        string memory side,
-        address receiveWallet,
-        uint256 sourceChainId,
-        uint256 destinationChainId,
-        uint256 timestamp,
-        uint256 nonce,
-        bytes memory signature
-    ) public pure returns (bool) {
-        bytes32 messageHash = keccak256(
-            abi.encodePacked(
-                orderId,
-                baseAsset,
-                quoteAsset,
-                price,
-                quantity,
-                side,
-                receiveWallet,
-                sourceChainId,
-                destinationChainId,
-                timestamp,
-                nonce
-            )
-        );
-
-        bytes32 ethSignedMessageHash = messageHash.toEthSignedMessageHash();
-        address recovered = ethSignedMessageHash.recover(signature);
-
-        return recovered == signer;
-    }
+    // Signatures removed; settlement is authorized via onlyOwner
 
     /**
      * @dev Settle cross-chain trade - P2P atomic swap without bridge
@@ -230,9 +188,6 @@ contract TradeSettlement is ReentrancyGuard, Ownable {
      */
     function settleCrossChainTrade(
         CrossChainTradeData memory tradeData,
-        bytes memory signature1,
-        bytes memory signature2,
-        bytes memory matchingEngineSignature,
         bool isSourceChain
     ) external nonReentrant onlyOwner {
         // Prevent replay attacks
@@ -286,66 +241,7 @@ contract TradeSettlement is ReentrancyGuard, Ownable {
         require(!executedTrades[tradeHash], "Trade already executed");
         executedTrades[tradeHash] = true;
 
-        // Verify party1 signature
-        require(
-            verifyCrossChainTradeSignature(
-                tradeData.party1,
-                tradeData.orderId,
-                tradeData.baseAsset,
-                tradeData.quoteAsset,
-                tradeData.price,
-                tradeData.quantity,
-                tradeData.party1Side,
-                tradeData.party1ReceiveWallet,
-                tradeData.sourceChainId,
-                tradeData.destinationChainId,
-                tradeData.timestamp,
-                tradeData.nonce1,
-                signature1
-            ),
-            "Invalid party1 signature"
-        );
-
-        // Verify party2 signature
-        require(
-            verifyCrossChainTradeSignature(
-                tradeData.party2,
-                tradeData.orderId,
-                tradeData.baseAsset,
-                tradeData.quoteAsset,
-                tradeData.price,
-                tradeData.quantity,
-                tradeData.party2Side,
-                tradeData.party2ReceiveWallet,
-                tradeData.sourceChainId,
-                tradeData.destinationChainId,
-                tradeData.timestamp,
-                tradeData.nonce2,
-                signature2
-            ),
-            "Invalid party2 signature"
-        );
-
-        // Verify matching engine signature
-        bytes32 matchingEngineHash = keccak256(
-            abi.encodePacked(
-                tradeData.orderId,
-                tradeData.party1,
-                tradeData.party2,
-                tradeData.party1ReceiveWallet,
-                tradeData.party2ReceiveWallet,
-                tradeData.baseAsset,
-                tradeData.quoteAsset,
-                tradeData.price,
-                tradeData.quantity,
-                isSourceChain,
-                block.chainid
-            )
-        );
-
-        bytes32 ethSignedHash = matchingEngineHash.toEthSignedMessageHash();
-        address recovered = ethSignedHash.recover(matchingEngineSignature);
-        require(recovered == owner(), "Invalid matching engine signature");
+        // Signatures removed; onlyOwner acts as the authorized matching engine
 
         settledCrossChainOrders[tradeData.orderId] = true;
 
@@ -356,11 +252,11 @@ contract TradeSettlement is ReentrancyGuard, Ownable {
         uint256 quoteAmount = (tradeData.quantity * tradeData.price) / 1e18;
 
         if (isSourceChain) {
-            _settleSourceChain(tradeData, baseAmount, quoteAmount);
+            _settleSourceChain(tradeData, baseAmount);
             settlementStatuses[tradeData.orderId].sourceChainSettled = true;
             settlementStatuses[tradeData.orderId].sourceChainTimestamp = block.timestamp;
         } else {
-            _settleDestinationChain(tradeData, baseAmount, quoteAmount);
+            _settleDestinationChain(tradeData, quoteAmount);
             settlementStatuses[tradeData.orderId].destinationChainSettled = true;
             settlementStatuses[tradeData.orderId].destinationChainTimestamp = block.timestamp;
         }
@@ -380,8 +276,7 @@ contract TradeSettlement is ReentrancyGuard, Ownable {
      */
     function _settleSourceChain(
         CrossChainTradeData memory tradeData,
-        uint256 baseAmount,
-        uint256 quoteAmount
+        uint256 baseAmount
     ) internal {
         address sender;
         address receiver;
@@ -442,7 +337,6 @@ contract TradeSettlement is ReentrancyGuard, Ownable {
      */
     function _settleDestinationChain(
         CrossChainTradeData memory tradeData,
-        uint256 baseAmount,
         uint256 quoteAmount
     ) internal {
         address sender;
@@ -545,7 +439,7 @@ contract TradeSettlement is ReentrancyGuard, Ownable {
     function emergencyRefundAsymmetricSettlement(
         bytes32 orderId,
         CrossChainTradeData memory tradeData,
-        bytes memory settlementProof
+        bytes memory /*settlementProof*/
     ) external nonReentrant onlyOwner {
         SettlementStatus storage status = settlementStatuses[orderId];
 
