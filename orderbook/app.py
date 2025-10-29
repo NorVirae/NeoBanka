@@ -233,6 +233,31 @@ async def get_settlement_address():
     )
 
 
+@app.get("/api/networks")
+async def get_networks():
+    try:
+        # Return a JSON-serializable view of supported networks (safe subset)
+        def _filter(net: dict):
+            if not isinstance(net, dict):
+                return {}
+            return {
+                "rpc": net.get("rpc"),
+                "chain_id": net.get("chain_id"),
+                "contract_address": net.get("contract_address"),
+                "tokens": net.get("tokens", {}),
+            }
+
+        data = {k: _filter(v) for k, v in SUPPORTED_NETWORKS.items()}
+        return {
+            "status_code": 200,
+            "message": "Supported networks",
+            "networks": data,
+        }
+    except Exception as e:
+        logger.error(f"Failed to get networks: {e}")
+        return {"status_code": 0, "message": str(e)}
+
+
 @app.post("/api/check_available_funds")
 async def check_available_funds(payload: str = Form(...)):
     return api_service.check_available_funds(

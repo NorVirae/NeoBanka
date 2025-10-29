@@ -73,10 +73,12 @@ class MarketMakerBot:
         self.private_key = private_key
         self.base_token_address = base_token_address
         self.quote_token_address = quote_token_address
+        self.networks_config = {}
 
     async def create(self):
         """Async constructor"""
         self.settler_contract_address = await self.fetch_settlement_address()
+        await self.fetch_networks_config()
         return self
 
     async def approve_token_allowance(
@@ -211,70 +213,11 @@ class MarketMakerBot:
 
     async def ensure_token_allowances(self):
         """
-        Ensure both base and quote tokens have sufficient allowance
-        Called before starting the bot
+        Deprecated pre-approval. We now approve exact-needed amounts on the
+        correct chain during ensure_escrow_balance_before_order.
         """
-        try:
-
-            quantity = self.config.get("quantity", 0)
-            if quantity <= 0:
-                logger.error("Invalid quantity for allowance approval")
-                return False
-
-            base_approved = False
-            if self.config.get("side") == "bid":
-
-                # Approve base token allowance
-                base_approved = await self.approve_token_allowance(
-                    self.base_token_address,
-                    quantity * 2,  # Approve 2x quantity for safety margin,
-                    self.settler_contract_address,
-                )
-
-                base_approved = await self.approve_token_allowance(
-                    self.quote_token_address,
-                    quantity * 2,  # Approve 2x quantity for safety margin
-                    self.settler_contract_address,
-                )
-            else:
-                # Approve base token allowance
-                base_approved = await self.approve_token_allowance(
-                    self.quote_token_address,
-                    quantity * 2,  # Approve 2x quantity for safety margin
-                    self.settler_contract_address,
-                )
-
-            if not base_approved:
-                logger.error("Failed to approve base token allowance")
-                return False
-
-            # Approve quote token allowance (estimate needed amount)
-            # Rough estimate: quantity * reference_price * 2 for safety
-            reference_price = self.config.get("reference_price", 1.0)
-            if not reference_price:
-                # Try to get current price for estimation
-                reference_price = (
-                    await self.get_gateio_price(
-                        self.config["base_asset"], self.config["quote_asset"]
-                    )
-                    or 1.0
-                )
-
-            quote_amount = quantity * reference_price * 2
-            quote_approved = await self.approve_token_allowance(
-                self.quote_token_address, quote_amount, self.settler_contract_address
-            )
-
-            if not quote_approved:
-                logger.error("Failed to approve quote token allowance")
-                return False
-
-            logger.info("All token allowances approved successfully")
-            return True
-
-        except Exception as e:
-            logger.error(f"Error ensuring token allowances: {e}")
-            return False
+        logger.info("Skipping upfront token allowances; handled during escrow deposit")
+        return True
 
     async def start_session(self):
         """Initialize HTTP session"""
@@ -343,6 +286,28 @@ class MarketMakerBot:
         except Exception:
             logger.exception("API request failed")
             return {"status_code": 0, "message": "API request failed"}
+
+    async def fetch_networks_config(self) -> None:
+        """Fetch networks configuration (rpc, chain_id, contract_address, tokens) from orderbook."""
+        try:
+            resp = await self.send_request("networks", request_type="get")
+            if isinstance(resp, dict) and resp.get("status_code") == 200:
+                nets = resp.get("networks") or {}
+                if isinstance(nets, dict):
+                    self.networks_config = nets
+                    logger.info("Loaded networks config: %s", list(nets.keys()))
+        except Exception:
+            logger.exception("Failed to fetch networks config")
+
+    def _resolve_token_address(self, symbol: str, network_key: str, fallback: str) -> str:
+        try:
+            symbol_up = (symbol or "").upper()
+            net = (self.networks_config or {}).get(network_key or "") or {}
+            tokens = net.get("tokens") or {}
+            addr = tokens.get(symbol_up)
+            return addr or fallback
+        except Exception:
+            return fallback
 
     def calculate_market_prices(self, reference_price: float, spread_percentage: float):
         """Calculate bid and ask prices based on reference price and spread"""
@@ -453,21 +418,38 @@ class MarketMakerBot:
         - For 'ask': needs base asset amount = quantity
         """
         try:
-            w3 = Web3(Web3.HTTPProvider(self.rpc_url))
+            # Select correct chain by side
+            from_net = (self.config.get("from_network") or "hedera").lower()
+            to_net = (self.config.get("to_network") or "polygon").lower()
+            if side == "ask":
+                network_key = from_net
+                symbol = self.config.get("base_asset")
+            else:
+                network_key = to_net
+                symbol = self.config.get("quote_asset")
+
+            # Resolve RPC and contract address for this network
+            net_cfg = (self.networks_config or {}).get(network_key) or {}
+            rpc_url = net_cfg.get("rpc") or self.rpc_url
+            settlement_address = net_cfg.get("contract_address") or self.settler_contract_address
+
+            w3 = Web3(Web3.HTTPProvider(rpc_url))
             if not w3.is_connected():
                 logger.error("Web3 not connected for escrow checks")
                 return False
 
             acct = Account.from_key(self.private_key)
-            settlement = w3.eth.contract(address=Web3.to_checksum_address(self.settler_contract_address), abi=SETTLEMENT_ABI)
+            settlement = w3.eth.contract(address=Web3.to_checksum_address(settlement_address), abi=SETTLEMENT_ABI)
 
-            # Determine token and required amount
+            # Determine token and required amount (resolve per-network token address)
             if side == "ask":
-                token_address = Web3.to_checksum_address(self.base_token_address)
+                token_addr_raw = self._resolve_token_address(symbol, network_key, self.base_token_address)
                 required_amount_float = float(quantity)
             else:
-                token_address = Web3.to_checksum_address(self.quote_token_address)
+                token_addr_raw = self._resolve_token_address(symbol, network_key, self.quote_token_address)
                 required_amount_float = float(quantity) * float(price)
+
+            token_address = Web3.to_checksum_address(token_addr_raw)
 
             # ERC20 instance
             token = w3.eth.contract(address=token_address, abi=ERC20_ABI)
@@ -488,13 +470,13 @@ class MarketMakerBot:
 
             # Ensure allowance for needed
             try:
-                allowance = token.functions.allowance(acct.address, self.settler_contract_address).call()
+                allowance = token.functions.allowance(acct.address, settlement_address).call()
             except Exception:
                 allowance = 0
 
             if int(allowance) < needed:
                 # Approve exact needed (avoid MaxUint issues on some RPCs)
-                approve_tx = token.functions.approve(self.settler_contract_address, needed).build_transaction({
+                approve_tx = token.functions.approve(settlement_address, needed).build_transaction({
                     "from": acct.address,
                     "nonce": w3.eth.get_transaction_count(acct.address),
                     "gas": 150000,
@@ -751,9 +733,8 @@ class MarketMakerBot:
         self.config = config
         await self.start_session()
 
-        # Ensure token allowances before starting
-        if not await self.ensure_token_allowances():
-            raise Exception("Failed to approve token allowances")
+        # Pre-approvals are handled dynamically during escrow deposit per network
+        await self.ensure_token_allowances()
 
         self.running = True
 
