@@ -23,6 +23,7 @@ import {
 import { useWallet } from '../hooks/useWallet';
 import { orderbookApi } from '../lib/api';
 import { useTrade } from '../hooks/useTrade';
+import { useToast } from './ui/use-toast';
 import { resolveSettlementAddress } from '../lib/contracts';
 import { priceService, type PriceData, PriceService } from '../lib/priceService';
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, ResponsiveContainer, Tooltip } from 'recharts';
@@ -30,6 +31,7 @@ import LabelTerminal from './ui/label-terminal';
 import { AssetList } from './ui/asset-select';
 import { NetworkList } from './ui/network-select';
 import { Candlestick } from './Candlestick';
+import BalancePanel from './BalancePanel';
 
 // API moved to lib/api.ts
 
@@ -575,6 +577,7 @@ export function TradingTerminal({ onSymbolChange }: { onSymbolChange?: (s: strin
 
   // Initialize trade hook at component level
   const { submitOrder, orderStatus, loading: tradeLoading } = useTrade();
+  const { toast } = useToast();
 
   const [orderbook, setOrderbook] = useState(null);
   const [loading, setLoading] = useState(false);
@@ -632,6 +635,28 @@ export function TradingTerminal({ onSymbolChange }: { onSymbolChange?: (s: strin
     }
   };
 
+  const lastStatusRef = useRef<string>('idle');
+
+  // Toast once per status change
+  useEffect(() => {
+    if (!orderStatus || orderStatus === lastStatusRef.current) return;
+    lastStatusRef.current = orderStatus;
+    if (orderStatus === 'approving') {
+      addLog('Waiting for token approval...', 'info');
+      toast({ title: 'Approval', description: 'Waiting for token approval…' });
+    } else if (orderStatus === 'depositing') {
+      addLog('Depositing funds to escrow...', 'info');
+      toast({ title: 'Escrow', description: 'Depositing to escrow…' });
+    } else if (orderStatus === 'submitting') {
+      addLog('Submitting order to orderbook...', 'info');
+      toast({ title: 'Order', description: 'Submitting order…' });
+    } else if (orderStatus === 'completed') {
+      toast({ title: 'Success', description: 'Order submitted.', variant: 'success' as any });
+    } else if (orderStatus === 'failed') {
+      toast({ title: 'Error', description: 'Order failed.', variant: 'destructive' as any });
+    }
+  }, [orderStatus]);
+
   const handleOrderSubmit = async (orderData) => {
     try {
       // First check wallet connection
@@ -644,23 +669,16 @@ export function TradingTerminal({ onSymbolChange }: { onSymbolChange?: (s: strin
       addLog(`Preparing ${orderData.side} order: ${orderData.quantity} ${orderData.baseAsset} @ ${orderData.price}`);
 
       // Update log based on order status
-      const statusInterval = setInterval(() => {
-        if (orderStatus === 'approving') {
-          addLog('Waiting for token approval...', 'info');
-        } else if (orderStatus === 'depositing') {
-          addLog('Depositing funds to escrow...', 'info');
-        } else if (orderStatus === 'submitting') {
-          addLog('Submitting order to orderbook...', 'info');
-        }
-      }, 2000);
+      // no interval-based toasts; handled by orderStatus effect above
 
       // Submit the order (hook handles all prerequisites)
       const result = await submitOrder(orderData);
 
-      clearInterval(statusInterval);
+      // nothing
 
       if (result.success) {
         addLog(`Order submitted successfully. ID: ${result.orderId}`, 'success');
+        toast({ title: 'Order submitted', description: `ID: ${result.orderId}`, variant: 'success' as any });
         if (result.trades?.length > 0) {
           addLog(`Order matched! ${result.trades.length} trades executed`, 'success');
           result.trades.forEach((trade, idx) => {
@@ -671,6 +689,7 @@ export function TradingTerminal({ onSymbolChange }: { onSymbolChange?: (s: strin
         await loadOrderbook();
       } else {
         addLog(`Order failed`, 'error');
+        toast({ title: 'Order failed', description: 'Settlement did not complete.', variant: 'destructive' as any });
       }
     } catch (error: any) {
       console.error('Order error:', error);
@@ -686,6 +705,7 @@ export function TradingTerminal({ onSymbolChange }: { onSymbolChange?: (s: strin
         } catch { }
       }
       addLog(`Order error: ${errorMsg}`, 'error');
+      toast({ title: 'Error', description: errorMsg, variant: 'destructive' as any });
 
       // Provide user-friendly error messages
       if (errorMsg.includes('insufficient')) {
@@ -866,6 +886,11 @@ export function TradingTerminal({ onSymbolChange }: { onSymbolChange?: (s: strin
           </div>
         </div>
       )}
+
+      {/* Balances Row */}
+      <div className="grid grid-cols-1">
+        <BalancePanel />
+      </div>
 
       {/* Main Trading Interface */}
       <div className="space-y-6">

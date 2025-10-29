@@ -8,10 +8,8 @@
   "gasUsed": "1903963",
   "timestamp": "2025-10-29T06:03:12.812Z"
 }
-//---------HBAR deployed to: 0xA219e375D1F84A50273c93FaaF5EACD285bD9990
-HBAR deployed to: 0x66B8244b08be8F4Cec1A23C5c57A1d7b8A27189D
+HBAR deployed to: 0xA219e375D1F84A50273c93FaaF5EACD285bD9990
 USDT deployed to: 0x62bcF51859E23cc47ddc6C3144B045619476Be92
-//---------USDT deployed to: 0x62bcF51859E23cc47ddc6C3144B045619476Be92
 
 
 ==================================================

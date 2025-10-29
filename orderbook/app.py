@@ -66,7 +66,7 @@ SUPPORTED_NETWORKS = {
         ),
         "tokens": {
             "HBAR": os.getenv(
-                "HEDERA_HBAR_TOKEN_ADDRESS", os.getenv("HBAR_TOKEN_ADDRESS", "0xA219e375D1F84A50273c93FaaF5EACD285bD9990")
+                "HEDERA_HBAR_TOKEN_ADDRESS", os.getenv("HBAR_TOKEN_ADDRESS", "0x66B8244b08be8F4Cec1A23C5c57A1d7b8A27189D")
             ),
             "USDT": os.getenv(
                 "HEDERA_USDT_TOKEN_ADDRESS", os.getenv("USDT_TOKEN_ADDRESS", "0x62bcF51859E23cc47ddc6C3144B045619476Be92")
@@ -318,6 +318,32 @@ async def settle_trades(request: Request):
         TOKEN_ADDRESSES=TOKEN_ADDRESSES,
         settlement_client=settlement_client,
     )
+
+
+@app.post("/api/faucet")
+async def faucet(request: Request):
+    try:
+        payload = await APIHelper.handlePayloadJson(request)
+        to = payload.get("to")
+        asset = (payload.get("asset") or "HBAR").upper()
+        network = (payload.get("network") or "hedera").lower()
+        amount = float(payload.get("amount") or 100)
+        if not to:
+            return {"status_code": 0, "message": "missing 'to'"}
+        net = SUPPORTED_NETWORKS.get(network)
+        if not net:
+            return {"status_code": 0, "message": f"unknown network {network}"}
+        token_addr = (net.get("tokens") or {}).get(asset)
+        if not token_addr:
+            return {"status_code": 0, "message": f"token not configured for {asset} on {network}"}
+
+        client = SettlementClient(net.get("rpc"), net.get("contract_address"), PRIVATE_KEY)
+        # Default decimals: HBAR 18, USDT 6 in our setup
+        decimals = 18 if asset == "HBAR" else 6
+        res = client.mint_token(token_addr, to, amount, token_decimals=decimals)
+        return {"status_code": 1 if res.get("success") else 0, "result": res}
+    except Exception as e:
+        return {"status_code": 0, "message": str(e)}
 
 
 if __name__ == "__main__":

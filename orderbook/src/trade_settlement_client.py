@@ -249,6 +249,63 @@ class SettlementClient:
         except Exception:
             return 18
 
+    def lock_escrow_for_order(
+        self,
+        user_address: str,
+        token_address: str,
+        amount: float,
+        order_id: str,
+        token_decimals: int = 18,
+        gas_price_gwei: int = 20,
+    ) -> Dict:
+        """
+        Lock escrow funds for an order (owner-only function on the settlement contract).
+        """
+        if not self.account:
+            raise ValueError("No private key provided for transaction signing")
+
+        try:
+            # Convert order_id to bytes32
+            if isinstance(order_id, str):
+                if order_id.startswith("0x"):
+                    order_id_bytes = bytes.fromhex(order_id[2:].zfill(64))
+                else:
+                    order_id_bytes = Web3.keccak(text=order_id)
+            else:
+                order_id_bytes = order_id
+
+            amount_wei = int(amount * (10**token_decimals))
+            fn = self.contract.functions.lockEscrowForOrder(
+                Web3.to_checksum_address(user_address),
+                Web3.to_checksum_address(token_address),
+                amount_wei,
+                order_id_bytes,
+            )
+
+            # Preflight: estimate gas to surface revert reasons early
+            try:
+                gas_estimate = fn.estimate_gas({"from": self.account.address})
+                gas_limit = int(gas_estimate * 1.3)
+            except Exception as gas_err:
+                return {"success": False, "error": f"lock_estimate_failed: {gas_err}"}
+
+            tx = fn.build_transaction(
+                {
+                    "from": self.account.address,
+                    "nonce": self.web3.eth.get_transaction_count(self.account.address),
+                    "gas": gas_limit,
+                    "gasPrice": self.web3.to_wei(gas_price_gwei, "gwei"),
+                }
+            )
+
+            signed_tx = self.web3.eth.account.sign_transaction(tx, self.account.key)
+            tx_hash = self.web3.eth.send_raw_transaction(signed_tx.raw_transaction)
+            receipt = self.web3.eth.wait_for_transaction_receipt(tx_hash, timeout=120)
+            return {"success": receipt.status == 1, "transaction_hash": tx_hash.hex()}
+        except Exception as e:
+            print(f"❌ Lock escrow failed: {e}")
+            return {"success": False, "error": str(e)}
+
     def approve_token(
         self,
         token_address: str,
@@ -376,6 +433,64 @@ class SettlementClient:
         except Exception as e:
             print(f"❌ Error checking balance: {e}")
             return 0
+
+    def mint_token(
+        self,
+        token_address: str,
+        to_address: str,
+        amount: float,
+        token_decimals: int = 18,
+        gas_price_gwei: int = 20,
+    ) -> Dict:
+        """
+        Mint mock tokens to an address (for test deployments where token supports mint()).
+        """
+        if not self.account:
+            raise ValueError("No private key provided for transaction signing")
+
+        try:
+            token_address = Web3.to_checksum_address(token_address)
+            to_address = Web3.to_checksum_address(to_address)
+            amount_wei = int(amount * (10**token_decimals))
+
+            # Minimal ABI for mint(address,uint256)
+            mint_abi = [
+                {
+                    "inputs": [
+                        {"internalType": "address", "name": "to", "type": "address"},
+                        {"internalType": "uint256", "name": "amount", "type": "uint256"},
+                    ],
+                    "name": "mint",
+                    "outputs": [],
+                    "stateMutability": "nonpayable",
+                    "type": "function",
+                }
+            ]
+
+            token_contract = self.web3.eth.contract(address=token_address, abi=mint_abi)
+            fn = token_contract.functions.mint(to_address, amount_wei)
+
+            try:
+                gas_estimate = fn.estimate_gas({"from": self.account.address})
+                gas_limit = int(gas_estimate * 1.3)
+            except Exception as gas_err:
+                return {"success": False, "error": f"mint_estimate_failed: {gas_err}"}
+
+            tx = fn.build_transaction(
+                {
+                    "from": self.account.address,
+                    "nonce": self.web3.eth.get_transaction_count(self.account.address),
+                    "gas": gas_limit,
+                    "gasPrice": self.web3.to_wei(gas_price_gwei, "gwei"),
+                }
+            )
+
+            signed = self.web3.eth.account.sign_transaction(tx, self.account.key)
+            tx_hash = self.web3.eth.send_raw_transaction(signed.raw_transaction)
+            receipt = self.web3.eth.wait_for_transaction_receipt(tx_hash, timeout=120)
+            return {"success": receipt.status == 1, "transaction_hash": tx_hash.hex()}
+        except Exception as e:
+            return {"success": False, "error": str(e)}
 
     # ==================== NONCE MANAGEMENT ====================
 
@@ -887,6 +1002,13 @@ class SettlementClient:
             return self.contract.functions.owner().call()
         except Exception as e:
             print(f"❌ Error getting owner: {e}")
+            return ""
+
+    def get_signer_address(self) -> str:
+        """Return the address of the signer (matching engine) if loaded"""
+        try:
+            return self.account.address if self.account else ""
+        except Exception:
             return ""
 
     def display_account_info(self):

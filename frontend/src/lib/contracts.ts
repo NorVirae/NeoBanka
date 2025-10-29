@@ -7,10 +7,10 @@ export const CHAIN_REGISTRY = {
   hedera: {
     chainId: Number(env.VITE_HEDERA_CHAIN_ID) || 296,
     rpc: env.VITE_HEDERA_RPC || "https://testnet.hashio.io/api",
-    settlement: env.VITE_HEDERA_SETTLEMENT || "",
+    settlement: env.VITE_HEDERA_SETTLEMENT || "0xB605031d2ba0Cf567DB8bdC56BD13b07d023c86E",
     tokens: {
-      HBAR: env.VITE_HEDERA_HBAR || "",
-      USDT: env.VITE_HEDERA_USDT || "",
+      HBAR: env.VITE_HEDERA_HBAR || "0x66B8244b08be8F4Cec1A23C5c57A1d7b8A27189D",
+      USDT: env.VITE_HEDERA_USDT || "0x62bcF51859E23cc47ddc6C3144B045619476Be92",
     },
   },
   polygon: {
@@ -138,8 +138,7 @@ export const VAULT_ABI = [
     "function checkEscrowBalance(address user, address token) external view returns (uint256 total, uint256 available, uint256 locked)",
     "function getUserNonce(address user, address token) external view returns (uint256)",
     "function lockEscrowForOrder(address user, address token, uint256 amount, bytes32 orderId) external",
-    "function verifyCrossChainTradeSignature(address signer, bytes32 orderId, address baseAsset, address quoteAsset, uint256 price, uint256 quantity, string memory side, address receiveWallet, uint256 sourceChainId, uint256 destinationChainId, uint256 timestamp, uint256 nonce, bytes memory signature) external pure returns (bool)",
-    "function settleCrossChainTrade((bytes32 orderId, address party1, address party2, address party1ReceiveWallet, address party2ReceiveWallet, address baseAsset, address quoteAsset, uint256 price, uint256 quantity, string party1Side, string party2Side, uint256 sourceChainId, uint256 destinationChainId, uint256 timestamp, uint256 nonce1, uint256 nonce2) tradeData, bytes signature1, bytes signature2, bytes matchingEngineSignature, bool isSourceChain) external",
+    "function settleCrossChainTrade((bytes32 orderId, address party1, address party2, address party1ReceiveWallet, address party2ReceiveWallet, address baseAsset, address quoteAsset, uint256 price, uint256 quantity, string party1Side, string party2Side, uint256 sourceChainId, uint256 destinationChainId, uint256 timestamp, uint256 nonce1, uint256 nonce2) tradeData, bool isSourceChain) external",
     "function escrowBalances(address user, address token) external view returns (uint256)",
     "function lockedBalances(address user, address token) external view returns (uint256)",
     "function orderLocks(bytes32 orderId) external view returns (bool)",
