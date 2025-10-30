@@ -13,7 +13,7 @@ export const NetworkList = ({
     network, 
     setNetwork, 
     label, 
-    assetList = ["hedera", "polygon"] 
+    assetList = ["hedera", "ethereum", "polygon"] 
 }: NetworkListProps) => {
     return (
         <div>

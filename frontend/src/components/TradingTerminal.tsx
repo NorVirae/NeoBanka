@@ -17,7 +17,9 @@ import {
   Heart,
   Users,
   Globe,
-  HandHeart
+  HandHeart,
+  ChevronLeft,
+  ChevronRight
 } from 'lucide-react';
 
 import { useWallet } from '../hooks/useWallet';
@@ -30,8 +32,8 @@ import { LineChart, Line, XAxis, YAxis, CartesianGrid, ResponsiveContainer, Tool
 import LabelTerminal from './ui/label-terminal';
 import { AssetList } from './ui/asset-select';
 import { NetworkList } from './ui/network-select';
-import { Candlestick } from './Candlestick';
 import BalancePanel from './BalancePanel';
+import { TradingViewChart } from './TradingViewChart';
 
 // API moved to lib/api.ts
 
@@ -241,8 +243,8 @@ const TradingPanel = ({ account, onOrderSubmit, loading, fromNetwork, toNetwork,
       (priceData) => {
         setMarketPrice(priceData);
 
-        // Auto-update price field if enabled
-        if (autoUpdatePrice && !price) {
+        // Auto-update price field when pair changes or if enabled and empty
+        if (autoUpdatePrice) {
           setPrice(PriceService.formatPrice(priceData.price));
         }
       },
@@ -253,6 +255,13 @@ const TradingPanel = ({ account, onOrderSubmit, loading, fromNetwork, toNetwork,
       unsubscribe();
     };
   }, [baseAsset, quoteAsset, autoUpdatePrice]);
+
+  // Auto-fill price when trading pair changes
+  useEffect(() => {
+    if (marketPrice && autoUpdatePrice) {
+      setPrice(PriceService.formatPrice(marketPrice.price));
+    }
+  }, [baseAsset, quoteAsset]);
 
   const handleSubmit = async (e) => {
     e.preventDefault();
@@ -323,6 +332,8 @@ const TradingPanel = ({ account, onOrderSubmit, loading, fromNetwork, toNetwork,
             <div className="grid grid-cols-2 gap-2">
               <Button type="button" variant="outline" size="sm" onClick={() => { setFromNetwork('hedera'); setToNetwork('polygon'); }}>Hedera → Polygon</Button>
               <Button type="button" variant="outline" size="sm" onClick={() => { setFromNetwork('polygon'); setToNetwork('hedera'); }}>Polygon → Hedera</Button>
+              <Button type="button" variant="outline" size="sm" onClick={() => { setFromNetwork('ethereum'); setToNetwork('polygon'); }}>Ethereum → Polygon</Button>
+              <Button type="button" variant="outline" size="sm" onClick={() => { setFromNetwork('polygon'); setToNetwork('ethereum'); }}>Polygon → Ethereum</Button>
             </div>
           )}
 
@@ -331,13 +342,13 @@ const TradingPanel = ({ account, onOrderSubmit, loading, fromNetwork, toNetwork,
               network={fromNetwork}
               setNetwork={setFromNetwork}
               label={"From network"}
-              assetList={variant === 'cross' ? ["hedera", "polygon"] : ["hedera"]}
+              assetList={variant === 'cross' ? ["hedera", "ethereum", "polygon"] : ["hedera"]}
             />
             <NetworkList
               network={toNetwork}
               setNetwork={setToNetwork}
               label={"To Network"}
-              assetList={variant === 'cross' ? ["hedera", "polygon"] : ["hedera"]}
+              assetList={variant === 'cross' ? ["hedera", "ethereum", "polygon"] : ["hedera"]}
             />
 
           </div>
@@ -357,8 +368,8 @@ const TradingPanel = ({ account, onOrderSubmit, loading, fromNetwork, toNetwork,
           )}
 
           <div className="grid grid-cols-2 gap-4">
-            <AssetList asset={baseAsset} setAsset={setBaseAsset} label={"Base Asset"} />
-            <AssetList asset={quoteAsset} setAsset={setQuoteAsset} label={"Quote Asset"} assetList={["USDT"]} />
+            <AssetList asset={baseAsset} setAsset={setBaseAsset} label={"Base Asset"} assetList={["HBAR", "xZAR", "cNGN"]} />
+            <AssetList asset={quoteAsset} setAsset={setQuoteAsset} label={"Quote Asset"} assetList={["USDT", "xZAR", "cNGN", "HBAR"]} />
 
           </div>
 
@@ -682,6 +693,7 @@ export function TradingTerminal({ onSymbolChange, variant = 'same', symbolSuffix
   const [loading, setLoading] = useState(false);
   // (Agents state removed)
   const [currentMarketPrice, setCurrentMarketPrice] = useState<PriceData | null>(null);
+  const [allMarketPrices, setAllMarketPrices] = useState<Record<string, PriceData>>({});
   const [logs, setLogs] = useState([
     { timestamp: new Date().toLocaleTimeString(), message: 'System initialized', type: 'info' },
     { timestamp: new Date().toLocaleTimeString(), message: 'Waiting for wallet connection...', type: 'info' }
@@ -852,42 +864,36 @@ export function TradingTerminal({ onSymbolChange, variant = 'same', symbolSuffix
     }
   }, [isConnected, account]);
 
-  const [symbol, setSymbol] = useState("HBAR_USDT");
-  const [candles, setCandles] = useState<Array<{ time: number; open: number; high: number; low: number; close: number }>>([]);
 
+  // Subscribe to market prices for all supported pairs
   useEffect(() => {
-    let mounted = true;
-    (async () => {
-      const ks = await priceService.fetchCandles(symbol, '1h', 200);
-      if (mounted) setCandles(ks);
-    })();
-    const id = setInterval(async () => {
-      const ks = await priceService.fetchCandles(symbol, '1h', 200);
-      if (mounted) setCandles(ks);
-    }, 60000);
-    return () => { mounted = false; clearInterval(id); };
-  }, [symbol]);
-
-  // Subscribe to market price for the main pair
-  useEffect(() => {
+    const supportedPairs = ['HBAR_USDT', 'xZAR_USDT', 'cNGN_USDT'];
+    const unsubscribeFunctions: (() => void)[] = [];
     let firstUpdate = true;
-    const unsubscribe = priceService.subscribe(
-      'HBAR_USDT',
-      (priceData) => {
-        setCurrentMarketPrice(priceData);
-        // Only log the first update, not every 30 seconds
-        if (firstUpdate) {
-          addLog(`Market price feed connected: HBAR/USDT @ ${PriceService.formatPrice(priceData.price)}`, 'success');
-          firstUpdate = false;
-        }
-      },
-      30000 // Update every 30 seconds
-    );
 
-    // (MCP status polling removed)
+    supportedPairs.forEach(pair => {
+      const unsubscribe = priceService.subscribe(
+        pair,
+        (priceData) => {
+          // Update individual price
+          setAllMarketPrices(prev => ({ ...prev, [pair]: priceData }));
+          
+          // Set main market price (default to HBAR_USDT)
+          if (pair === 'HBAR_USDT') {
+            setCurrentMarketPrice(priceData);
+            if (firstUpdate) {
+              addLog(`Market price feeds connected for ${supportedPairs.length} pairs`, 'success');
+              firstUpdate = false;
+            }
+          }
+        },
+        30000 // Update every 30 seconds
+      );
+      unsubscribeFunctions.push(unsubscribe);
+    });
 
     return () => {
-      unsubscribe();
+      unsubscribeFunctions.forEach(fn => fn());
     };
   }, []);
 
@@ -931,7 +937,7 @@ export function TradingTerminal({ onSymbolChange, variant = 'same', symbolSuffix
       )}
 
       {/* Market Stats Bar */}
-      {currentMarketPrice && (
+      {Object.keys(allMarketPrices).length > 0 && (
         <div className="bg-neobanka-black-400 border-2 border-neobanka-teal-500 rounded-xl p-4">
           <div className="flex items-center justify-between">
             <div className="flex items-center space-x-8">
@@ -940,36 +946,29 @@ export function TradingTerminal({ onSymbolChange, variant = 'same', symbolSuffix
                   <BarChart3 className="h-5 w-5 text-white" />
                 </div>
                 <div>
-                  <div className="text-sm font-bold text-neobanka-teal-300">HBAR/USDT</div>
-                  <div className="text-xs text-gray-400">Spot Market</div>
+                  <div className="text-sm font-bold text-neobanka-teal-300">Live Markets</div>
+                  <div className="text-xs text-gray-400">Spot Trading</div>
                 </div>
               </div>
-              <div className="flex items-center space-x-6">
-                <div className="text-center">
-                  <div className="text-xs text-gray-400 mb-1">Price</div>
-                  <div className="font-mono font-bold text-2xl text-white">
-                    ${PriceService.formatPrice(currentMarketPrice.price)}
+              
+              {/* Display all trading pairs */}
+              <div className="flex items-center space-x-8">
+                {Object.entries(allMarketPrices).map(([symbol, priceData]) => (
+                  <div key={symbol} className="text-center">
+                    <div className="text-xs text-gray-400 mb-1">{symbol.replace('_', '/')}</div>
+                    <div className="font-mono font-bold text-lg text-white">
+                      ${PriceService.formatPrice(priceData.price)}
+                    </div>
+                    <div className={`text-xs font-semibold ${priceData.change24h >= 0 ? 'text-green-400' : 'text-red-400'}`}>
+                      {PriceService.formatChange(priceData.change24h)}
+                    </div>
                   </div>
-                </div>
-                <div className="text-center">
-                  <div className="text-xs text-gray-400 mb-1">24h Change</div>
-                  <div className={`px-4 py-2 rounded font-semibold ${currentMarketPrice.change24h >= 0 ? 'bg-green-500/20 text-green-400 border border-green-500' : 'bg-red-500/20 text-red-400 border border-red-500'}`}>
-                    {PriceService.formatChange(currentMarketPrice.change24h)}
-                  </div>
-                </div>
+                ))}
               </div>
             </div>
-            <div className="flex items-center space-x-6 text-sm">
-              <div className="text-center">
-                <div className="text-xs text-gray-400">24h Volume</div>
-                <div className="font-mono font-semibold text-neobanka-teal-300">
-                  ${(currentMarketPrice.volume24h / 1000000).toFixed(2)}M
-                </div>
-              </div>
-              <div className="flex items-center space-x-2 px-3 py-2 bg-neobanka-teal-500/20 border border-neobanka-teal-500 rounded">
-                <div className="w-2 h-2 bg-neobanka-teal-400 rounded-full"></div>
-                <span className="text-xs font-medium text-neobanka-teal-300">LIVE</span>
-              </div>
+            <div className="flex items-center space-x-2 px-3 py-2 bg-neobanka-teal-500/20 border border-neobanka-teal-500 rounded">
+              <div className="w-2 h-2 bg-neobanka-teal-400 rounded-full"></div>
+              <span className="text-xs font-medium text-neobanka-teal-300">LIVE</span>
             </div>
           </div>
         </div>
@@ -983,27 +982,36 @@ export function TradingTerminal({ onSymbolChange, variant = 'same', symbolSuffix
       {/* Main Trading Interface */}
       <div className="space-y-6">
 
-        {/* Top Row - Trading and Agents */}
+        {/* Top Row - Charts and Trading Panel */}
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-          {/* Agents panel removed */}
+          {/* Candles Chart Section */}
           <div className="bg-neobanka-black-400 border border-neobanka-teal-500 rounded-xl p-6">
             <div className="flex items-center justify-between mb-4">
               <div className="flex items-center gap-3">
                 <div className="w-8 h-8 bg-neobanka-teal-500 rounded-lg flex items-center justify-center">
-                  <Zap className="h-4 w-4 text-white" />
+                  <BarChart3 className="h-4 w-4 text-white" />
                 </div>
                 <div>
-                  <div className="text-sm font-bold text-white">1H Candles</div>
-                  <div className="text-xs text-neobanka-teal-400 font-mono">{symbol}</div>
+                  <div className="text-sm font-bold text-white">Candles</div>
+                  <div className="text-xs text-neobanka-teal-400 font-mono">{currentSymbol}</div>
                 </div>
               </div>
               <div className="flex items-center gap-2">
-                <div className="px-2 py-1 bg-neobanka-teal-500/20 border border-neobanka-teal-500 rounded text-xs text-neobanka-teal-300">1H</div>
                 <div className="w-2 h-2 bg-green-400 rounded-full"></div>
               </div>
             </div>
-            <Candlestick data={candles} height={300} />
+            
+            {/* Chart Content */}
+            <div className="h-[300px]">
+              <TradingViewChart 
+                symbol={currentSymbol} 
+                onSymbolChange={setCurrentSymbol}
+                className="h-full"
+              />
+            </div>
           </div>
+          
+          {/* Trading Panel */}
           <TradingPanel
             account={account}
             onOrderSubmit={handleOrderSubmit}

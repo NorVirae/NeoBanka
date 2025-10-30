@@ -38,14 +38,47 @@ class PriceService {
     'BTC_USDT': 'BTC_USDT',
     'ETH_USDT': 'ETH_USDT',
     'MATIC_USDT': 'MATIC_USDT',
-    // Add more mappings as needed
+  };
+
+  // Special stablecoins with realistic pricing based on fiat rates
+  private stablecoinPrices: Record<string, () => PriceData> = {
+    'xZAR_USDT': () => this.generateStablecoinPrice('xZAR_USDT', 0.053, 0.002), // ~ZAR to USD rate
+    'cNGN_USDT': () => this.generateStablecoinPrice('cNGN_USDT', 0.00061, 0.00003), // ~NGN to USD rate
   };
 
   /**
-   * Fetch current price for a trading pair from Gate.io
+   * Generate realistic stablecoin price data
+   */
+  private generateStablecoinPrice(symbol: string, basePrice: number, volatility: number): PriceData {
+    const variation = (Math.random() - 0.5) * volatility;
+    const price = basePrice * (1 + variation);
+    
+    return {
+      pair: symbol,
+      price: price,
+      bid: price * 0.9995,
+      ask: price * 1.0005,
+      change24h: (Math.random() - 0.5) * 4, // ±2% daily change
+      volume24h: Math.random() * 50000 + 10000, // 10k-60k volume
+      high24h: price * 1.02,
+      low24h: price * 0.98,
+      timestamp: Date.now()
+    };
+  }
+
+  /**
+   * Fetch current price for a trading pair from Gate.io or use stablecoin pricing
    */
   async fetchPrice(symbol: string): Promise<PriceData | null> {
     try {
+      // Check if this is a special stablecoin
+      if (this.stablecoinPrices[symbol]) {
+        const priceData = this.stablecoinPrices[symbol]();
+        this.cache.set(symbol, priceData);
+        this.notifyListeners(symbol, priceData);
+        return priceData;
+      }
+
       const gateSymbol = this.symbolMapping[symbol] || symbol;
       
       // Use backend proxy to avoid CORS issues
@@ -58,16 +91,15 @@ class PriceService {
 
       if (!response.ok) {
         console.warn(`Failed to fetch price for ${symbol}: ${response.status}`);
-        // Fallback to mock price when proxy fails
-        return this.getMockPrice(symbol);
+        return null;
       }
 
       const data = await response.json() as any;
       const arr = Array.isArray(data) ? (data as GateIOTicker[]) : [];
       
       if (!arr || arr.length === 0 || !arr[0] || typeof arr[0].last === 'undefined') {
-        console.warn(`No price data for ${symbol}, using mock price`);
-        return this.getMockPrice(symbol);
+        console.warn(`No price data for ${symbol}`);
+        return null;
       }
 
       const ticker = arr[0];
@@ -93,8 +125,7 @@ class PriceService {
       return priceData;
     } catch (error) {
       console.error(`Error fetching price for ${symbol}:`, error);
-      // Return mock price as fallback
-      return this.getMockPrice(symbol);
+      return null;
     }
   }
 

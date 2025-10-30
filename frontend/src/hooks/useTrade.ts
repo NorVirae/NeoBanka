@@ -54,7 +54,7 @@ export function useTrade() {
   const contractCodeCache = new Map<string, boolean>();
   
   // Ensure wallet has enough native token for gas on current chain
-  const ensureSufficientNative = async (chainKey: 'hedera' | 'polygon') => {
+  const ensureSufficientNative = async (chainKey: 'hedera' | 'polygon' | 'ethereum') => {
     if (!account) throw new Error('Wallet not connected');
     let balance: bigint;
     try {
@@ -64,13 +64,14 @@ export function useTrade() {
       balance = await readonlyProvider.getBalance(account);
     }
     // Minimal safe buffer per chain (tunable)
-    const minByChain: Record<'hedera' | 'polygon', string> = {
+    const minByChain: Record<'hedera' | 'polygon' | 'ethereum', string> = {
       hedera: '0.005', // HBAR
       polygon: '0.05', // MATIC on Amoy
+      ethereum: '0.01', // ETH
     };
     const minWei = ethers.parseEther(minByChain[chainKey]);
     if (balance < minWei) {
-      const sym = chainKey === 'hedera' ? 'HBAR' : 'MATIC';
+      const sym = chainKey === 'hedera' ? 'HBAR' : chainKey === 'polygon' ? 'MATIC' : 'ETH';
       throw new Error(`INSUFFICIENT_PAYER_BALANCE: Not enough ${sym} to cover gas fees`);
     }
   };
@@ -140,16 +141,73 @@ export function useTrade() {
   };
 
   // Ensure we are on a specific chain
-  const ensureNetwork = async (targetChainId: number) => {
+  const ensureNetwork = async (targetChainId: number, retries = 5, refreshProvider = false) => {
     if (!provider) throw new Error('Wallet not connected');
-    const net = await provider.getNetwork();
-    if (Number(net.chainId) !== targetChainId) {
-      throw new Error(`WRONG_NETWORK:${targetChainId}`);
+    
+    // If we just switched networks, we need to refresh the provider to avoid NETWORK_ERROR
+    let currentProvider = provider;
+    if (refreshProvider) {
+      console.log('Refreshing provider after network switch...');
+      await new Promise(resolve => setTimeout(resolve, 2000));
+      
+      // Create a fresh provider instance
+      try {
+        const anyWindow: any = window;
+        if (anyWindow.ethereum) {
+          currentProvider = new ethers.BrowserProvider(anyWindow.ethereum);
+        }
+      } catch (e) {
+        console.warn('Failed to refresh provider, using original');
+        currentProvider = provider;
+      }
+    }
+    
+    for (let i = 0; i < retries; i++) {
+      try {
+        // Add initial delay for first check to let network settle
+        if (i === 0) {
+          await new Promise(resolve => setTimeout(resolve, 1000));
+        }
+        
+        const net = await currentProvider.getNetwork();
+        const currentChainId = Number(net.chainId);
+        
+        console.log(`Network check attempt ${i + 1}: current=${currentChainId}, target=${targetChainId}`);
+        
+        if (currentChainId === targetChainId) {
+          console.log('Network check successful!');
+          return; // Success
+        }
+        
+        if (i === retries - 1) {
+          throw new Error(`WRONG_NETWORK:${targetChainId} (current: ${currentChainId})`);
+        }
+      } catch (error: any) {
+        console.log(`Network check error attempt ${i + 1}:`, error.code, error.message);
+        
+        // If we get NETWORK_ERROR and haven't tried refreshing provider yet, try that
+        if (error.code === 'NETWORK_ERROR' && !refreshProvider && i === 0) {
+          console.log('Network error detected, trying with fresh provider...');
+          return await ensureNetwork(targetChainId, retries, true);
+        }
+        
+        if ((error.code === 'NETWORK_ERROR' || error.code === 'UNKNOWN_ERROR') && i < retries - 1) {
+          // Network is in transition, wait longer and retry
+          await new Promise(resolve => setTimeout(resolve, 2000));
+          continue;
+        }
+        if (i === retries - 1) {
+          if (error.message?.includes('WRONG_NETWORK:')) throw error;
+          throw new Error(`WRONG_NETWORK:${targetChainId} (error: ${error.message})`);
+        }
+      }
+      // Wait before retry with exponential backoff
+      await new Promise(resolve => setTimeout(resolve, 1000 * (i + 1)));
     }
   };
 
   // Attempt to switch chain in the user's wallet; add chain if missing
-  const switchOrAddNetwork = async (targetKey: 'hedera' | 'polygon') => {
+  const switchOrAddNetwork = async (targetKey: 'hedera' | 'polygon' | 'ethereum') => {
     if (!provider) throw new Error('Wallet not connected');
     const target = CHAIN_REGISTRY[targetKey];
     if (!target?.chainId) throw new Error(`Unknown network key: ${targetKey}`);
@@ -172,12 +230,20 @@ export function useTrade() {
               rpcUrls: (HEDERA_TESTNET.rpcUrls as any) || [],
               blockExplorerUrls: HEDERA_TESTNET.blockExplorerUrls as any,
             }
-          : {
+          : targetKey === 'polygon'
+          ? {
               chainId: hexChainId,
               chainName: 'Polygon Amoy Testnet',
               nativeCurrency: { name: 'MATIC', symbol: 'MATIC', decimals: 18 },
               rpcUrls: [CHAIN_REGISTRY.polygon.rpc].filter(Boolean),
               blockExplorerUrls: ['https://www.oklink.com/amoy'] as any,
+            }
+          : {
+              chainId: hexChainId,
+              chainName: 'Ethereum Mainnet',
+              nativeCurrency: { name: 'ETH', symbol: 'ETH', decimals: 18 },
+              rpcUrls: [CHAIN_REGISTRY.ethereum.rpc].filter(Boolean),
+              blockExplorerUrls: ['https://etherscan.io'] as any,
             };
         await anyProv.send('wallet_addEthereumChain', [params]);
         await anyProv.send('wallet_switchEthereumChain', [{ chainId: hexChainId }]);
@@ -204,7 +270,7 @@ export function useTrade() {
   };
 
   const getTokenAddressForNetwork = (networkKey: string, asset: string): string => {
-    const key = (networkKey || '').toLowerCase() as 'hedera' | 'polygon';
+    const key = (networkKey || '').toLowerCase() as 'hedera' | 'polygon' | 'ethereum';
     const addr = resolveTokenAddress(key, asset);
     if (!addr) throw new Error(`Token address not configured for ${asset} on ${key}`);
     return addr;
@@ -288,28 +354,45 @@ export function useTrade() {
     setState(prev => ({ ...prev, loading: true, error: null, orderStatus: 'idle' }));
 
     try {
-      // Get token addresses
+      // Debug logs
+      console.log('Order debug:', {
+        side: orderData.side,
+        fromNetwork: orderData.fromNetwork,
+        toNetwork: orderData.toNetwork,
+        baseAsset: orderData.baseAsset,
+        quoteAsset: orderData.quoteAsset
+      });
+      
+      // For cross-chain trades, escrow should be on the network where the sender has tokens
+      // Ask (sell): sender has base asset, needs base asset network for escrow
+      // Bid (buy): sender has quote asset, needs quote asset network for escrow
       const escrowNetKey = (orderData.side === 'ask' ? orderData.fromNetwork : orderData.toNetwork).toLowerCase();
-      const escrowChain = CHAIN_REGISTRY[escrowNetKey as 'hedera' | 'polygon'];
+      console.log('Selected escrow network:', escrowNetKey);
+      
+      const escrowChain = CHAIN_REGISTRY[escrowNetKey as 'hedera' | 'polygon' | 'ethereum'];
       if (!escrowChain) throw new Error(`Unknown network: ${escrowNetKey}`);
       const baseTokenAddress = getTokenAddressForNetwork(orderData.fromNetwork, orderData.baseAsset);
       const quoteTokenAddress = getTokenAddressForNetwork(orderData.toNetwork, orderData.quoteAsset);
-      const settlementAddr = resolveSettlementAddress(escrowNetKey as 'hedera' | 'polygon');
+      const settlementAddr = resolveSettlementAddress(escrowNetKey as 'hedera' | 'polygon' | 'ethereum');
       if (!settlementAddr) throw new Error(`Settlement address not set for ${escrowNetKey}`);
       // Try to auto-switch to the correct network for approvals/escrow
       try {
         await ensureNetwork(escrowChain.chainId);
       } catch (e: any) {
         if (String(e?.message || '').startsWith('WRONG_NETWORK:')) {
-          await switchOrAddNetwork(escrowNetKey as 'hedera' | 'polygon');
-          // re-verify
-          await ensureNetwork(escrowChain.chainId);
+          console.log('Network switch required, switching to:', escrowNetKey);
+          await switchOrAddNetwork(escrowNetKey as 'hedera' | 'polygon' | 'ethereum');
+          console.log('Network switch completed, waiting for settlement...');
+          // Wait for network switch to complete and settle
+          await new Promise(resolve => setTimeout(resolve, 2000));
+          // re-verify with fresh provider to handle network transition
+          await ensureNetwork(escrowChain.chainId, 5, true);
         } else {
           throw e;
         }
       }
       // Ensure native balance on the now-selected chain
-      await ensureSufficientNative(escrowNetKey as 'hedera' | 'polygon');
+      await ensureSufficientNative(escrowNetKey as 'hedera' | 'polygon' | 'ethereum');
       console.log('Network + settlement used:', { escrowNetKey, chainId: escrowChain.chainId, settlementAddr, baseTokenAddress, quoteTokenAddress });
 
       // Verify backend and frontend use the same settlement address
@@ -359,7 +442,7 @@ export function useTrade() {
         const needed = requiredAmount - escrowBalance.available;
         const neededFormatted = ethers.formatUnits(needed, decimals);
         console.log(`Step 3: Depositing ${neededFormatted} to escrow...`);
-        await depositToEscrow(tokenToUse, neededFormatted, settlementAddr, escrowChain.rpc, escrowNetKey as 'hedera' | 'polygon');
+        await depositToEscrow(tokenToUse, neededFormatted, settlementAddr, escrowChain.rpc, escrowNetKey as 'hedera' | 'polygon' | 'ethereum');
         // Do not block on mirror-node updates; proceed to submit order
       } else {
         console.log('Step 3: Sufficient escrow balance, skipping deposit');
@@ -437,7 +520,7 @@ export function useTrade() {
     if (!provider || !account) return false;
     try {
       const net = await provider.getNetwork();
-      const chainKey: 'hedera' | 'polygon' = Number(net.chainId) === CHAIN_REGISTRY.polygon.chainId ? 'polygon' : 'hedera';
+      const chainKey: 'hedera' | 'polygon' | 'ethereum' = Number(net.chainId) === CHAIN_REGISTRY.polygon.chainId ? 'polygon' : Number(net.chainId) === CHAIN_REGISTRY.ethereum.chainId ? 'ethereum' : 'hedera';
       const tokenAddress = resolveTokenAddress(chainKey, asset);
       if (!tokenAddress) return false;
       const token = await getTokenContract(tokenAddress);
@@ -512,7 +595,7 @@ export function useTrade() {
     }
   };
 
-  const depositToEscrow = async (tokenAddress: string, amount: string, settlementAddr?: string, rpcOverride?: string, chainKey?: 'hedera' | 'polygon'): Promise<void> => {
+  const depositToEscrow = async (tokenAddress: string, amount: string, settlementAddr?: string, rpcOverride?: string, chainKey?: 'hedera' | 'polygon' | 'ethereum'): Promise<void> => {
     if (!signer || !account) throw new Error('Wallet not connected');
 
     setState(prev => ({ ...prev, loading: true, orderStatus: 'depositing' }));
@@ -587,7 +670,7 @@ export function useTrade() {
       const decimals = await getTokenDecimals(tokenAddress);
       const parsedAmount = ethers.parseUnits(amount, decimals);
       const net = await provider!.getNetwork();
-      const chainKey: 'hedera' | 'polygon' = Number(net.chainId) === CHAIN_REGISTRY.polygon.chainId ? 'polygon' : 'hedera';
+      const chainKey: 'hedera' | 'polygon' | 'ethereum' = Number(net.chainId) === CHAIN_REGISTRY.polygon.chainId ? 'polygon' : Number(net.chainId) === CHAIN_REGISTRY.ethereum.chainId ? 'ethereum' : 'hedera';
       const settlementAddr = resolveSettlementAddress(chainKey);
       const settlement = await getSettlementContract(settlementAddr);
       const withdrawTx = await settlement.withdrawFromEscrow(tokenAddress, parsedAmount, { gasLimit: 250000, gasPrice: ethers.parseUnits('1', 'gwei') });
@@ -608,7 +691,7 @@ export function useTrade() {
   const getUserNonce = async (tokenAddress: string): Promise<bigint> => {
     if (!provider || !account) throw new Error('Wallet not connected');
     const net = await provider.getNetwork();
-    const chainKey: 'hedera' | 'polygon' = Number(net.chainId) === CHAIN_REGISTRY.polygon.chainId ? 'polygon' : 'hedera';
+    const chainKey: 'hedera' | 'polygon' | 'ethereum' = Number(net.chainId) === CHAIN_REGISTRY.polygon.chainId ? 'polygon' : Number(net.chainId) === CHAIN_REGISTRY.ethereum.chainId ? 'ethereum' : 'hedera';
     const settlementAddr = resolveSettlementAddress(chainKey);
     const settlement = await getSettlementContract(settlementAddr);
     return await settlement.getUserNonce(account, tokenAddress);
