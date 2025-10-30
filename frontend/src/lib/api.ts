@@ -22,6 +22,8 @@ export interface OrderData {
   to_network?: string;
   receiveWallet: string;
   privateKey?: string; // Optional for backend signing
+  // Optional book override to separate cross-chain from same-chain order books
+  symbol_override?: string;
 }
 
 export interface OrderResponse {
@@ -62,6 +64,15 @@ export const orderbookApi = {
     });
     return await res.json();
   },
+  async registerOrderCross(orderData: OrderData): Promise<OrderResponse> {
+    const res = await fetch(`${ORDERBOOK_API_URL}/api/register_order_cross`, {
+      method: 'POST',
+      headers: { 'Accept': 'application/json' },
+      body: toFormData(orderData),
+      credentials: 'include',
+    });
+    return await res.json();
+  },
   async settleTrades(payload: { order: any; trades: any[] }) {
     const res = await fetch(`${ORDERBOOK_API_URL}/api/settle_trades`, {
       method: 'POST',
@@ -84,6 +95,13 @@ export const orderbookApi = {
       method: 'POST',
       // IMPORTANT: let the browser set multipart/form-data for FormData
       // Setting application/x-www-form-urlencoded breaks FastAPI Form(...) parsing
+      body: toFormData({ symbol, from_network: fromNetwork, to_network: toNetwork })
+    });
+    return await res.json();
+  },
+  async getOrderbookCross(symbol: string, fromNetwork?: string, toNetwork?: string) {
+    const res = await fetch(`${ORDERBOOK_API_URL}/api/orderbook_cross`, {
+      method: 'POST',
       body: toFormData({ symbol, from_network: fromNetwork, to_network: toNetwork })
     });
     return await res.json();
@@ -120,15 +138,18 @@ export const orderbookApi = {
     const res = await fetch(`${ORDERBOOK_API_URL}/api/settlement_health`);
     return await res.json();
   },
-  async getSettlementAddress() {
-    const res = await fetch(`${ORDERBOOK_API_URL}/api/get_settlement_address`);
-    return await res.json();
-  },
   async getOrderHistory(symbol?: string, limit: number = 100) {
     const params = new URLSearchParams();
     if (symbol) params.set('symbol', symbol);
     params.set('limit', String(limit));
     const res = await fetch(`${ORDERBOOK_API_URL}/api/order_history?${params.toString()}`);
+    return await res.json();
+  },
+  async getOrderHistoryCross(symbol?: string, limit: number = 100) {
+    const params = new URLSearchParams();
+    if (symbol) params.set('symbol', symbol);
+    params.set('limit', String(limit));
+    const res = await fetch(`${ORDERBOOK_API_URL}/api/order_history_cross?${params.toString()}`);
     return await res.json();
   },
 };

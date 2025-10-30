@@ -205,7 +205,7 @@ const OrderBookPanel = ({ symbol, orderbook, onRefresh, loading, fromNetwork, to
   );
 };
 
-const TradingPanel = ({ account, onOrderSubmit, loading, fromNetwork, toNetwork, setFromNetwork, setToNetwork, onSymbolChange }) => {
+const TradingPanel = ({ account, onOrderSubmit, loading, fromNetwork, toNetwork, setFromNetwork, setToNetwork, onSymbolChange, variant = 'same' }) => {
   const [orderType, setOrderType] = useState('limit');
   const [side, setSide] = useState('buy');
   const [price, setPrice] = useState('');
@@ -214,6 +214,7 @@ const TradingPanel = ({ account, onOrderSubmit, loading, fromNetwork, toNetwork,
   const [quoteAsset, setQuoteAsset] = useState('USDT');
   const [marketPrice, setMarketPrice] = useState<PriceData | null>(null);
   const [autoUpdatePrice, setAutoUpdatePrice] = useState(true);
+  const [receiveWallet, setReceiveWallet] = useState<string>(account || '');
 
   // Subscribe to price updates
   useEffect(() => {
@@ -258,7 +259,7 @@ const TradingPanel = ({ account, onOrderSubmit, loading, fromNetwork, toNetwork,
         side: side === 'buy' ? 'bid' : 'ask',
         fromNetwork,
         toNetwork,
-        receiveWallet: account, // Using the same account for receiving, can be changed later
+        receiveWallet: receiveWallet || account,
         type: orderType as any,
       });
 
@@ -301,11 +302,43 @@ const TradingPanel = ({ account, onOrderSubmit, loading, fromNetwork, toNetwork,
             </Button>
           </div>
 
+          {/* Cross-chain leg quick toggles (cross variant only) */}
+          {variant === 'cross' && (
+            <div className="grid grid-cols-2 gap-2">
+              <Button type="button" variant="outline" size="sm" onClick={() => { setFromNetwork('hedera'); setToNetwork('polygon'); }}>Hedera → Polygon</Button>
+              <Button type="button" variant="outline" size="sm" onClick={() => { setFromNetwork('polygon'); setToNetwork('hedera'); }}>Polygon → Hedera</Button>
+            </div>
+          )}
+
           <div className="grid grid-cols-2 gap-4">
-            <NetworkList network={fromNetwork} setNetwork={setFromNetwork} label={"From network"} assetList={["hedera"]} />
-            <NetworkList network={toNetwork} setNetwork={setToNetwork} label={"To Network"} assetList={["hedera", "polygon"]} />
+            <NetworkList
+              network={fromNetwork}
+              setNetwork={setFromNetwork}
+              label={"From network"}
+              assetList={variant === 'cross' ? ["hedera", "polygon"] : ["hedera"]}
+            />
+            <NetworkList
+              network={toNetwork}
+              setNetwork={setToNetwork}
+              label={"To Network"}
+              assetList={variant === 'cross' ? ["hedera", "polygon"] : ["hedera"]}
+            />
 
           </div>
+
+          {variant === 'cross' && (
+            <div>
+              <LabelTerminal htmlFor="receiveWallet" className="text-sm">Receive Wallet on To Network (optional)</LabelTerminal>
+              <Input
+                id="receiveWallet"
+                type="text"
+                value={receiveWallet}
+                onChange={(e) => setReceiveWallet(e.target.value)}
+                placeholder={account || '0x...'}
+              />
+              <div className="text-[11px] text-muted-foreground mt-1">If empty, your wallet address will be used on the destination chain.</div>
+            </div>
+          )}
 
           <div className="grid grid-cols-2 gap-4">
             <AssetList asset={baseAsset} setAsset={setBaseAsset} label={"Base Asset"} />
@@ -437,7 +470,7 @@ const TerminalLog = ({ logs }) => {
   );
 };
 
-const OrderHistoryPanel = ({ symbol }) => {
+const OrderHistoryPanel = ({ symbol, useCross = false }) => {
   const [rows, setRows] = useState<any[]>([]);
   const [loading, setLoading] = useState(false);
   useEffect(() => {
@@ -445,15 +478,21 @@ const OrderHistoryPanel = ({ symbol }) => {
     const load = async () => {
       setLoading(true);
       try {
-        const res = await orderbookApi.getOrderHistory(symbol, 100);
-        if (mounted) setRows(res?.history || []);
+        const res = useCross
+          ? await orderbookApi.getOrderHistoryCross(symbol, 100)
+          : await orderbookApi.getOrderHistory(symbol, 100);
+        if (mounted) {
+          const hist = Array.isArray(res?.history) ? res.history : [];
+          hist.sort((a: any, b: any) => (Number(b?.timestamp || 0) - Number(a?.timestamp || 0)));
+          setRows(hist);
+        }
       } catch {}
       setLoading(false);
     };
     load();
-    const id = setInterval(load, 5000);
+    const id = setInterval(load, 10000);
     return () => { mounted = false; clearInterval(id); };
-  }, [symbol]);
+  }, [symbol, useCross]);
   return (
     <Card className="h-full">
       <CardHeader className="pb-2">
@@ -553,7 +592,7 @@ const PriceChartPanel = ({ symbol }) => {
         const next = [...prev, { t: pd.timestamp, p: pd.price }];
         return next.slice(-120);
       });
-    }, 15000);
+    }, 10000);
     return () => unsub();
   }, [symbol]);
 
@@ -582,7 +621,7 @@ const PriceChartPanel = ({ symbol }) => {
 };
 
 // Main Trading Terminal Component
-export function TradingTerminal({ onSymbolChange }: { onSymbolChange?: (s: string) => void }) {
+export function TradingTerminal({ onSymbolChange, variant = 'same', symbolSuffix = '', defaultFromNetwork, defaultToNetwork }: { onSymbolChange?: (s: string) => void; variant?: 'same' | 'cross'; symbolSuffix?: string; defaultFromNetwork?: string; defaultToNetwork?: string; }) {
   const {
     account,
     isConnected,
@@ -592,11 +631,11 @@ export function TradingTerminal({ onSymbolChange }: { onSymbolChange?: (s: strin
     isOnHederaTestnet,
     switchToHederaTestnet
   } = useWallet();
-  const [fromNetwork, setFromNetwork] = useState('hedera');
-  const [toNetwork, setToNetwork] = useState('hedera');
+  const [fromNetwork, setFromNetwork] = useState(defaultFromNetwork || 'hedera');
+  const [toNetwork, setToNetwork] = useState(defaultToNetwork || 'hedera');
 
   // Initialize trade hook at component level
-  const { submitOrder, orderStatus, loading: tradeLoading } = useTrade();
+  const { submitOrder, submitOrderCross, orderStatus, loading: tradeLoading } = useTrade();
   const { toast } = useToast();
 
   const [orderbook, setOrderbook] = useState(null);
@@ -610,6 +649,7 @@ export function TradingTerminal({ onSymbolChange }: { onSymbolChange?: (s: strin
   // (Agent status removed)
 
   const [currentSymbol, setCurrentSymbol] = useState('HBAR_USDT');
+  const bookSymbol = symbolSuffix ? `${currentSymbol}${symbolSuffix}` : currentSymbol;
 
   useEffect(() => {
     try { onSymbolChange && onSymbolChange(currentSymbol); } catch { }
@@ -629,7 +669,9 @@ export function TradingTerminal({ onSymbolChange }: { onSymbolChange?: (s: strin
 
     setLoading(true);
     try {
-      const response = await orderbookApi.getOrderbook(currentSymbol, fromNetwork, toNetwork);
+      const response = variant === 'cross'
+        ? await orderbookApi.getOrderbookCross(bookSymbol, fromNetwork, toNetwork)
+        : await orderbookApi.getOrderbook(bookSymbol, fromNetwork, toNetwork);
       if (response.status_code === 1) {
         setOrderbook(response.orderbook);
         addLog(`Orderbook loaded: ${response.orderbook.asks?.length || 0} asks, ${response.orderbook.bids?.length || 0} bids`);
@@ -692,7 +734,9 @@ export function TradingTerminal({ onSymbolChange }: { onSymbolChange?: (s: strin
       // no interval-based toasts; handled by orderStatus effect above
 
       // Submit the order (hook handles all prerequisites)
-      const result = await submitOrder(orderData);
+      const result = variant === 'cross'
+        ? await submitOrderCross({ ...orderData })
+        : await submitOrder({ ...orderData });
 
       // nothing
 
@@ -750,7 +794,7 @@ export function TradingTerminal({ onSymbolChange }: { onSymbolChange?: (s: strin
   useEffect(() => {
     if (isConnected) {
       loadOrderbook();
-      const interval = setInterval(loadOrderbook, 5000);
+      const interval = setInterval(loadOrderbook, 10000);
       return () => clearInterval(interval);
     }
   }, [isConnected]);
@@ -848,7 +892,7 @@ export function TradingTerminal({ onSymbolChange }: { onSymbolChange?: (s: strin
         </div>
       )}
 
-      {isConnected && !isOnHederaTestnet && (
+      {variant === 'same' && isConnected && !isOnHederaTestnet && (
         <div className="bg-destructive/10 border border-destructive/20 rounded-lg p-4">
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-2">
@@ -931,6 +975,7 @@ export function TradingTerminal({ onSymbolChange }: { onSymbolChange?: (s: strin
             setFromNetwork={setFromNetwork}
             setToNetwork={setToNetwork}
             onSymbolChange={setCurrentSymbol}
+            variant={variant}
           />
         </div>
 
@@ -942,14 +987,14 @@ export function TradingTerminal({ onSymbolChange }: { onSymbolChange?: (s: strin
         {/* Middle Row - Order Book and Market Stats */}
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
           <OrderBookPanel
-            symbol={currentSymbol}
+            symbol={bookSymbol}
             orderbook={orderbook}
             onRefresh={loadOrderbook}
             loading={loading}
             fromNetwork={fromNetwork}
             toNetwork={toNetwork}
           />
-          <OrderHistoryPanel symbol={currentSymbol} />
+          <OrderHistoryPanel symbol={bookSymbol} useCross={variant === 'cross'} />
         </div>
 
         {/* Bottom Row - Activity Log */}
