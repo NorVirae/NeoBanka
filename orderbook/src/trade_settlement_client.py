@@ -14,10 +14,10 @@ from typing import Dict, Optional
 # from src import settlement ERC20_ABI, TRADE_SETTLEMENT_ABI
 
 
-with open("orderbook/abis/ERC20_abi.json", "r", encoding="utf-8") as f:
+with open("abis/ERC20_abi.json", "r", encoding="utf-8") as f:
     ERC20_ABI = json.load(f)
 
-with open("orderbook/abis/settlement_abi.json", "r", encoding="utf-8") as f:
+with open("abis/settlement_abi.json", "r", encoding="utf-8") as f:
     TRADE_SETTLEMENT_ABI = json.load(f)
 
 
