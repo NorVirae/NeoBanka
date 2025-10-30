@@ -1,6 +1,9 @@
 NeoBanka Monorepo
 =================
 
+pitch deck : https://neobanka-pitch.vercel.app/
+certif
+
 This repository contains three parts that work together:
 
 - `orderbook`: FastAPI server implementing a cross-chain order book and settlement integration.
