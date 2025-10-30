@@ -148,7 +148,7 @@ settlement_client: Optional[SettlementClient] = None
 
 PRIVATE_KEY = os.getenv("PRIVATE_KEY")  # Should be loaded securely
 try:
-    CONTRACT_ABI = APIHelper.load_abi("orderbook/settlement_abi.json")
+    CONTRACT_ABI = APIHelper.load_abi("settlement_abi.json")
 except Exception:
     CONTRACT_ABI = []  # fallback
 
