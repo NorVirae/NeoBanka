@@ -24,3 +24,14 @@ USDT deployed to: 0x62bcF51859E23cc47ddc6C3144B045619476Be92
 }
 HBAR deployed to: 0x41086d277f8A183A351310eC89d1AA9Dc1e67B7B
 USDT deployed to: 0x750702AA1dE631277576602b780A38790c36E19e
+
+==================================================
+{
+  "network": "ethereum sepolia",
+  "contract": "TradeSettlement",
+  "address": "0x10F0F2cb456BEd15655afB22ddd7d0EEE11FdBc9",
+  "deployer": "0x877664Ae1f1ca217977562A04592eCbCADb2Ca58",
+  "chainId": 11155111,
+  "timestamp": "2025-10-30T00:00:00.000Z",
+  "blockExplorer": "https://sepolia.etherscan.io/address/0x10F0F2cb456BEd15655afB22ddd7d0EEE11FdBc9"
+}

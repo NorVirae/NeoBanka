@@ -11,15 +11,29 @@ export const CHAIN_REGISTRY = {
     tokens: {
       HBAR: env.VITE_HEDERA_HBAR || "",
       USDT: env.VITE_HEDERA_USDT || "",
+      xZAR: env.VITE_HEDERA_XZAR || "",
+      cNGN: env.VITE_HEDERA_CNGN || "",
+    },
+  },
+  ethereum: {
+    chainId: Number(env.VITE_ETHEREUM_CHAIN_ID) || 11155111,
+    rpc: env.VITE_ETHEREUM_RPC || "https://ethereum-sepolia-rpc.publicnode.com",
+    settlement: env.VITE_ETHEREUM_SETTLEMENT || "",
+    tokens: {
+      USDT: env.VITE_ETHEREUM_USDT || "0x7169D38820dfd117C3FA1f22a697dBA58d90BA06",
+      xZAR: env.VITE_ETHEREUM_XZAR || "0x48f07301e9e29c3c38a80ae8d9ae771f224f1054",
+      cNGN: env.VITE_ETHEREUM_CNGN || "0x17CDB2a01e7a34CbB3DD4b83260B05d0274C8dab",
     },
   },
   polygon: {
     chainId: Number(env.VITE_POLYGON_CHAIN_ID) || 80002,
-    rpc: env.VITE_POLYGON_RPC || "https://rpc-amoy.polygon.technology/",
+    rpc: env.VITE_POLYGON_RPC || "https://rpc-amoy.polygon.technology",
     settlement: env.VITE_POLYGON_SETTLEMENT || "",
     tokens: {
       HBAR: env.VITE_POLYGON_HBAR || "",
       USDT: env.VITE_POLYGON_USDT || "",
+      xZAR: env.VITE_POLYGON_XZAR || "",
+      cNGN: env.VITE_POLYGON_CNGN || "",
     },
   },
 } as const;
@@ -156,12 +170,21 @@ export const VAULT_ABI = [
   "18": 18,
   };
 
-export function resolveTokenAddress(network: "hedera" | "polygon", symbol: string): string {
+export function resolveTokenAddress(network: "hedera" | "polygon" | "ethereum", symbol: string): string {
   const reg = CHAIN_REGISTRY[network];
-  const addr = reg?.tokens?.[symbol.toUpperCase() as "HBAR" | "USDT"] || "";
+  
+  // Try exact match first, then uppercase match
+  let addr = reg?.tokens?.[symbol as keyof typeof reg.tokens] || "";
+  
+  if (!addr) {
+    // Try uppercase version
+    const upperSymbol = symbol.toUpperCase();
+    addr = reg?.tokens?.[upperSymbol as keyof typeof reg.tokens] || "";
+  }
+  
   return addr;
 }
 
-export function resolveSettlementAddress(network: "hedera" | "polygon"): string {
+export function resolveSettlementAddress(network: "hedera" | "polygon" | "ethereum"): string {
   return CHAIN_REGISTRY[network]?.settlement || "";
 }

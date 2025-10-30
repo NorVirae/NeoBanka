@@ -2,7 +2,7 @@ import LabelTerminal from "./label-terminal"
 
 
 
-export const AssetList = ({asset, setAsset, label, assetList=["HBAR"]}) => {
+export const AssetList = ({asset, setAsset, label, assetList=["HBAR", "USDT", "xZAR", "cNGN"]}) => {
     return (
         <div>
             <LabelTerminal htmlFor="base-asset" className="text-sm">{label}</LabelTerminal>

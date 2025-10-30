@@ -74,15 +74,20 @@ SUPPORTED_NETWORKS = {
         },
     },
     "ethereum": {
-        "rpc": os.getenv("WEB3_PROVIDER_ETHEREUM", "https://mainnet.infura.io/v3/YOUR_KEY"),
-        "chain_id": int(os.getenv("WEB3_CHAIN_ID_ETHEREUM", "1")),
+        "rpc": os.getenv("WEB3_PROVIDER_ETHEREUM", "https://ethereum-sepolia-rpc.publicnode.com"),
+        "chain_id": int(os.getenv("WEB3_CHAIN_ID_ETHEREUM", "11155111")),
         "contract_address": os.getenv(
-            "TRADE_SETTLE_CONTRACT_ADDRESS_ETHEREUM", TRADE_SETTLEMENT_CONTRACT_ADDRESS
+            "TRADE_SETTLE_CONTRACT_ADDRESS_ETHEREUM", "0x10F0F2cb456BEd15655afB22ddd7d0EEE11FdBc9"
         ),
+        "tokens": {
+            "USDT": os.getenv("USDT_ETH_ADDRESS", "0x7169D38820dfd117C3FA1f22a697dBA58d90BA06"),
+            "xZAR": os.getenv("XZAR_ETH_ADDRESS", "0x48f07301e9e29c3c38a80ae8d9ae771f224f1054"),
+            "cNGN": os.getenv("CNGN_ETH_ADDRESS", "0x17CDB2a01e7a34CbB3DD4b83260B05d0274C8dab"),
+        },
     },
     "polygon": {
-        "rpc": os.getenv("WEB3_PROVIDER_POLYGON", "https://polygon-rpc.com"),
-        "chain_id": int(os.getenv("WEB3_CHAIN_ID_POLYGON", "137")),
+        "rpc": os.getenv("WEB3_PROVIDER_POLYGON", "https://rpc-amoy.polygon.technology"),
+        "chain_id": int(os.getenv("WEB3_CHAIN_ID_POLYGON", "80002")),
         "contract_address": os.getenv(
             "TRADE_SETTLE_CONTRACT_ADDRESS_POLYGON", TRADE_SETTLEMENT_CONTRACT_ADDRESS
         ),
@@ -90,6 +95,8 @@ SUPPORTED_NETWORKS = {
             # Defaults can be Amoy or your own deployments; override in env for mainnet/testnet
             "HBAR": os.getenv("POLYGON_HBAR_TOKEN_ADDRESS", "0x41086d277f8A183A351310eC89d1AA9Dc1e67B7B"),
             "USDT": os.getenv("POLYGON_USDT_TOKEN_ADDRESS", "0x750702AA1dE631277576602b780A38790c36E19e"),
+            "xZAR": os.getenv("XZAR_POLYGON_ADDRESS", "0x30DE46509Dbc3a491128F97be0aaf70dc7ff33cb"),
+            "cNGN": os.getenv("CNGN_POLYGON_ADDRESS", "0x52828daa48C1a9A06F37500882b42daf0bE04C3B"),
         },
     },
     "bsc": {
@@ -98,6 +105,9 @@ SUPPORTED_NETWORKS = {
         "contract_address": os.getenv(
             "TRADE_SETTLE_CONTRACT_ADDRESS_BSC", TRADE_SETTLEMENT_CONTRACT_ADDRESS
         ),
+        "tokens": {
+            "cNGN": os.getenv("CNGN_BSC_ADDRESS", "0xa8AEA66B361a8d53e8865c62D142167Af28Af058"),
+        },
     },
     "celo": {
         "rpc": os.getenv("WEB3_PROVIDER_CELO", "https://forno.celo.org"),
@@ -105,6 +115,11 @@ SUPPORTED_NETWORKS = {
         "contract_address": os.getenv(
             "TRADE_SETTLE_CONTRACT_ADDRESS_CELO", TRADE_SETTLEMENT_CONTRACT_ADDRESS
         ),
+        "tokens": {
+            "cKES": os.getenv("CKES_CELO_ADDRESS", "0x456a3D042C0DbD3db53D5489e98dFb038553B0d0"),
+            "cZAR": os.getenv("CZAR_CELO_ADDRESS", "0x4c35853A3B4e647fD266f4de678dCc8fEC410BF6"),
+            "cGHS": os.getenv("CGHS_CELO_ADDRESS", "0xfAeA5F3404bbA20D3cc2f8C4B0A888F55a3c7313"),
+        },
     },
     "base": {
         "rpc": os.getenv("WEB3_PROVIDER_BASE", "https://mainnet.base.org"),
@@ -112,6 +127,9 @@ SUPPORTED_NETWORKS = {
         "contract_address": os.getenv(
             "TRADE_SETTLE_CONTRACT_ADDRESS_BASE", TRADE_SETTLEMENT_CONTRACT_ADDRESS
         ),
+        "tokens": {
+            "cNGN": os.getenv("CNGN_BASE_ADDRESS", "0x46C85152bFe9f96829aA94755D9f915F9B10EF5F"),
+        },
     },
 }
 
@@ -156,6 +174,33 @@ except Exception:
 TOKEN_ADDRESSES = {
     "HBAR": os.getenv("HBAR_TOKEN_ADDRESS", SUPPORTED_NETWORKS["hedera"]["tokens"]["HBAR"]),
     "USDT": os.getenv("USDT_TOKEN_ADDRESS", SUPPORTED_NETWORKS["hedera"]["tokens"]["USDT"]),
+    "xZAR_ETH": os.getenv(
+        "XZAR_ETH_ADDRESS", "0x48f07301e9e29c3c38a80ae8d9ae771f224f1054"
+    ),
+    "xZAR_POLYGON": os.getenv(
+        "XZAR_POLYGON_ADDRESS", "0x30DE46509Dbc3a491128F97be0aaf70dc7ff33cb"
+    ),
+    "cNGN_ETH": os.getenv(
+        "CNGN_ETH_ADDRESS", "0x17CDB2a01e7a34CbB3DD4b83260B05d0274C8dab"
+    ),
+    "cNGN_BSC": os.getenv(
+        "CNGN_BSC_ADDRESS", "0xa8AEA66B361a8d53e8865c62D142167Af28Af058"
+    ),
+    "cNGN_POLYGON": os.getenv(
+        "CNGN_POLYGON_ADDRESS", "0x52828daa48C1a9A06F37500882b42daf0bE04C3B"
+    ),
+    "cNGN_BASE": os.getenv(
+        "CNGN_BASE_ADDRESS", "0x46C85152bFe9f96829aA94755D9f915F9B10EF5F"
+    ),
+    "cKES_CELO": os.getenv(
+        "CKES_CELO_ADDRESS", "0x456a3D042C0DbD3db53D5489e98dFb038553B0d0"
+    ),
+    "cZAR_CELO": os.getenv(
+        "CZAR_CELO_ADDRESS", "0x4c35853A3B4e647fD266f4de678dCc8fEC410BF6"
+    ),
+    "cGHS_CELO": os.getenv(
+        "CGHS_CELO_ADDRESS", "0xfAeA5F3404bbA20D3cc2f8C4B0A888F55a3c7313"
+    ),
 }
 
 
