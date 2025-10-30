@@ -38,12 +38,12 @@ import BalancePanel from './BalancePanel';
 // UI Components
 const Button = ({ children, variant = 'default', size = 'default', className = '', disabled = false, onClick, ...props }) => {
   const variants = {
-    default: 'bg-primary hover:bg-primary/90 text-primary-foreground',
-    destructive: 'bg-destructive hover:bg-destructive/90 text-destructive-foreground',
-    outline: 'border border-input bg-background hover:bg-accent hover:text-accent-foreground',
-    secondary: 'bg-secondary hover:bg-secondary/80 text-secondary-foreground',
+    default: 'bg-primary hover:bg-primary/90 text-primary-foreground shadow-sm',
+    destructive: 'bg-destructive hover:bg-destructive/90 text-destructive-foreground shadow-sm',
+    outline: 'border border-border bg-background hover:bg-accent hover:text-accent-foreground',
+    secondary: 'bg-secondary hover:bg-secondary/80 text-secondary-foreground shadow-sm',
     ghost: 'hover:bg-accent hover:text-accent-foreground',
-    success: 'bg-green-600 hover:bg-green-700 text-white'
+    success: 'bg-neobanka-success hover:bg-neobanka-success/90 text-white shadow-sm'
   };
 
   const sizes = {
@@ -64,11 +64,22 @@ const Button = ({ children, variant = 'default', size = 'default', className = '
   );
 };
 
-const Card = ({ children, className = '' }) => (
-  <div className={`bg-card border border-border rounded-lg ${className}`}>
-    {children}
-  </div>
-);
+const Card = ({ children, className = '', variant = 'default' }) => {
+  const variants = {
+    default: 'bg-card border border-border rounded-xl',
+    neon: 'bg-neobanka-black-500 border-2 border-neobanka-teal-500 rounded-xl',
+    glass: 'bg-neobanka-black-400 border border-neobanka-teal-500/40 rounded-xl',
+    solid: 'bg-neobanka-black-300 border-l-4 border-l-neobanka-teal-400 rounded-r-xl',
+    minimal: 'bg-transparent border-t-2 border-t-neobanka-teal-500 pt-4',
+    terminal: 'bg-neobanka-black-800 border border-neobanka-teal-600 rounded-lg font-mono'
+  };
+  
+  return (
+    <div className={`${variants[variant]} ${className}`}>
+      {children}
+    </div>
+  );
+};
 
 const CardHeader = ({ children, className = '' }) => (
   <div className={`p-4 border-b border-border ${className}`}>{children}</div>
@@ -114,21 +125,23 @@ const Input = ({ className = '', ...props }) => (
 // Trading Components
 const OrderBookPanel = ({ symbol, orderbook, onRefresh, loading, fromNetwork, toNetwork }) => {
   return (
-    <Card className="h-full">
-      <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-        <CardTitle className="text-base">Order Book</CardTitle>
+    <Card variant="glass" className="h-full">
+      <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-3 border-b border-neobanka-teal-500/30">
+        <CardTitle className="text-base font-semibold text-white">
+          Order Book
+        </CardTitle>
         <div className="flex items-center space-x-2">
-          <Badge variant="outline" className="text-xs">
+          <div className="px-2 py-1 bg-neobanka-teal-500/20 border border-neobanka-teal-400 rounded text-xs font-mono text-neobanka-teal-300">
             {symbol}
-          </Badge>
+          </div>
           <Button
             variant="ghost"
             size="sm"
             onClick={onRefresh}
             disabled={loading}
-            className="p-1"
+            className="p-2 hover:bg-neobanka-teal-500/20 rounded"
           >
-            <RefreshCw className={`h-3 w-3 ${loading ? 'animate-spin' : ''}`} />
+            <RefreshCw className={`h-4 w-4 text-neobanka-teal-400 ${loading ? 'animate-spin' : ''}`} />
           </Button>
         </div>
       </CardHeader>
@@ -271,9 +284,12 @@ const TradingPanel = ({ account, onOrderSubmit, loading, fromNetwork, toNetwork,
   };
 
   return (
-    <Card className="h-full">
-      <CardHeader>
-        <CardTitle className="text-base">Place Order</CardTitle>
+    <Card variant="neon" className="h-full">
+      <CardHeader className="border-b border-neobanka-teal-500/20">
+        <CardTitle className="text-base flex items-center gap-2">
+          <div className="w-2 h-2 bg-neobanka-teal-400 rounded-full"></div>
+          Place Order
+        </CardTitle>
       </CardHeader>
       <CardContent>
         <form onSubmit={handleSubmit} className="space-y-4">
@@ -450,20 +466,31 @@ const TerminalLog = ({ logs }) => {
   }, [logs]);
 
   return (
-    <Card className="h-full">
-      <CardHeader className="pb-2">
-        <CardTitle className="text-base flex items-center gap-2">
-          <Activity className="h-4 w-4" />
-          Activity Log
+    <Card variant="terminal" className="h-full">
+      <CardHeader className="pb-2 border-b border-neobanka-teal-600/20">
+        <CardTitle className="text-base flex items-center gap-3 font-mono text-neobanka-teal-300">
+          <div className="flex items-center gap-1">
+            <div className="w-3 h-3 bg-neobanka-teal-400 rounded-full"></div>
+            <div className="w-3 h-3 bg-neobanka-teal-600 rounded-full"></div>
+            <div className="w-3 h-3 bg-neobanka-teal-800 rounded-full"></div>
+          </div>
+          <Terminal className="h-4 w-4" />
+          ACTIVITY_LOG.sh
         </CardTitle>
       </CardHeader>
-      <CardContent className="pt-2">
-        <div ref={logRef} className="h-48 overflow-y-auto bg-muted/30 rounded p-3 text-xs">
+      <CardContent className="pt-3">
+        <div ref={logRef} className="h-48 overflow-y-auto bg-neobanka-black-900 border border-neobanka-teal-700 rounded p-4 text-xs font-mono">
+          <div className="text-neobanka-teal-400 mb-2 text-[10px]">$ tail -f /var/log/neobanka/activity.log</div>
           {logs.map((log, index) => (
-            <div key={index} className={`mb-2 ${log.type === 'error' ? 'text-red-600' : log.type === 'success' ? 'text-green-600' : 'text-foreground'}`}>
-              <span className="text-muted-foreground">{log.timestamp}</span> {log.message}
+            <div key={index} className={`mb-1 flex items-start gap-2 ${log.type === 'error' ? 'text-red-400' : log.type === 'success' ? 'text-green-400' : 'text-gray-300'}`}>
+              <span className="text-neobanka-teal-600 shrink-0 w-16 text-[10px]">[{log.timestamp}]</span>
+              <span className="leading-tight">{log.message}</span>
             </div>
           ))}
+          <div className="flex items-center gap-1 mt-2 text-neobanka-teal-400 text-[10px]">
+            <span>$</span>
+            <div className="w-2 h-3 bg-neobanka-teal-400"></div>
+          </div>
         </div>
       </CardContent>
     </Card>
@@ -494,9 +521,13 @@ const OrderHistoryPanel = ({ symbol, useCross = false }) => {
     return () => { mounted = false; clearInterval(id); };
   }, [symbol, useCross]);
   return (
-    <Card className="h-full">
-      <CardHeader className="pb-2">
-        <CardTitle className="text-base">Order History</CardTitle>
+    <Card variant="minimal" className="h-full">
+      <CardHeader className="pb-3 px-0">
+        <CardTitle className="text-base flex items-center gap-2 text-white">
+          <BookOpen className="h-4 w-4 text-neobanka-teal-400" />
+          Order History
+          <div className="ml-auto text-xs text-neobanka-teal-500 font-mono">{rows.length} records</div>
+        </CardTitle>
       </CardHeader>
       <CardContent className="pt-2">
         <div className="h-48 overflow-y-auto text-xs">
@@ -550,10 +581,12 @@ const MarketStats = ({ symbol, orderbook }) => {
   };
 
   return (
-    <Card className="h-full">
-      <CardHeader className="pb-2">
-        <CardTitle className="text-base flex items-center gap-2">
-          <BarChart3 className="h-4 w-4" />
+    <Card variant="solid" className="h-full">
+      <CardHeader className="pb-3 border-b-0">
+        <CardTitle className="text-base flex items-center gap-2 text-neobanka-teal-300">
+          <div className="p-1.5 bg-neobanka-teal-500/20 rounded-lg">
+            <BarChart3 className="h-4 w-4 text-neobanka-teal-400" />
+          </div>
           Market Statistics
         </CardTitle>
       </CardHeader>
@@ -599,9 +632,16 @@ const PriceChartPanel = ({ symbol }) => {
   const data = series.map(pt => ({ time: pt.t, price: pt.p }));
 
   return (
-    <Card className="h-full">
-      <CardHeader className="pb-2">
-        <CardTitle className="text-base">Price Chart ({symbol})</CardTitle>
+    <Card variant="glass" className="h-full">
+      <CardHeader className="pb-3 border-b border-neobanka-teal-500/30">
+        <CardTitle className="text-base flex items-center gap-2">
+          <div className="w-8 h-8 bg-neobanka-teal-500 rounded-xl flex items-center justify-center">
+            <TrendingUp className="h-4 w-4 text-white" />
+          </div>
+          <span className="text-white">
+            Price Chart ({symbol})
+          </span>
+        </CardTitle>
       </CardHeader>
       <CardContent className="pt-2">
         <div style={{ height: 260 }}>
@@ -854,30 +894,6 @@ export function TradingTerminal({ onSymbolChange, variant = 'same', symbolSuffix
   return (
     <div className="space-y-6">
 
-      {/* Impact Banner */}
-      <div className="bg-gradient-to-r from-blue-50 to-green-50 dark:from-blue-950/30 dark:to-green-950/30 border border-border rounded-lg p-4">
-        <div className="flex items-center justify-between">
-          <div className="flex items-center space-x-3">
-            <div className="bg-green-100 dark:bg-green-900/30 p-2 rounded-full">
-              <HandHeart className="h-4 w-4 text-green-600 dark:text-green-400" />
-            </div>
-            <div>
-              <h3 className="text-sm font-medium">Trade and Bank with Purpose</h3>
-              <p className="text-xs text-muted-foreground">Your profits contribute to verified social impact projects</p>
-            </div>
-          </div>
-          <div className="flex items-center space-x-4 text-xs">
-            <div className="flex items-center space-x-1">
-              <Users className="h-3 w-3 text-blue-500" />
-              <span className="text-muted-foreground">2,847 beneficiaries</span>
-            </div>
-            <div className="flex items-center space-x-1">
-              <Globe className="h-3 w-3 text-green-500" />
-              <span className="text-muted-foreground">15 countries</span>
-            </div>
-          </div>
-        </div>
-      </div>
 
       {/* Connection Status - Only show alerts for issues */}
       {!isConnected && (
@@ -916,35 +932,43 @@ export function TradingTerminal({ onSymbolChange, variant = 'same', symbolSuffix
 
       {/* Market Stats Bar */}
       {currentMarketPrice && (
-        <div className="bg-card border border-border rounded-lg p-3">
+        <div className="bg-neobanka-black-400 border-2 border-neobanka-teal-500 rounded-xl p-4">
           <div className="flex items-center justify-between">
-            <div className="flex items-center space-x-6">
-              <div className="flex items-center space-x-2">
-                <BarChart3 className="h-4 w-4 text-primary" />
-                <span className="text-sm font-medium">HBAR/USDT</span>
-              </div>
+            <div className="flex items-center space-x-8">
               <div className="flex items-center space-x-3">
-                <div>
-                  <span className="text-xs text-muted-foreground">Price:</span>
-                  <span className="ml-1 font-mono font-semibold text-lg">
-                    ${PriceService.formatPrice(currentMarketPrice.price)}
-                  </span>
+                <div className="w-10 h-10 bg-neobanka-teal-500 rounded-xl flex items-center justify-center">
+                  <BarChart3 className="h-5 w-5 text-white" />
                 </div>
-                <div className={`px-2 py-1 rounded ${currentMarketPrice.change24h >= 0 ? 'bg-green-500/10 text-green-500' : 'bg-red-500/10 text-red-500'}`}>
-                  <span className="text-sm font-semibold">
+                <div>
+                  <div className="text-sm font-bold text-neobanka-teal-300">HBAR/USDT</div>
+                  <div className="text-xs text-gray-400">Spot Market</div>
+                </div>
+              </div>
+              <div className="flex items-center space-x-6">
+                <div className="text-center">
+                  <div className="text-xs text-gray-400 mb-1">Price</div>
+                  <div className="font-mono font-bold text-2xl text-white">
+                    ${PriceService.formatPrice(currentMarketPrice.price)}
+                  </div>
+                </div>
+                <div className="text-center">
+                  <div className="text-xs text-gray-400 mb-1">24h Change</div>
+                  <div className={`px-4 py-2 rounded font-semibold ${currentMarketPrice.change24h >= 0 ? 'bg-green-500/20 text-green-400 border border-green-500' : 'bg-red-500/20 text-red-400 border border-red-500'}`}>
                     {PriceService.formatChange(currentMarketPrice.change24h)}
-                  </span>
+                  </div>
                 </div>
               </div>
             </div>
-            <div className="flex items-center space-x-4 text-xs text-muted-foreground">
-              <div>
-                <span>24h Vol: </span>
-                <span className="font-mono">${(currentMarketPrice.volume24h / 1000000).toFixed(2)}M</span>
+            <div className="flex items-center space-x-6 text-sm">
+              <div className="text-center">
+                <div className="text-xs text-gray-400">24h Volume</div>
+                <div className="font-mono font-semibold text-neobanka-teal-300">
+                  ${(currentMarketPrice.volume24h / 1000000).toFixed(2)}M
+                </div>
               </div>
-              <div className="flex items-center space-x-1 text-primary">
-                <RefreshCw className="h-3 w-3 animate-pulse" />
-                <span>Live from Gate.io</span>
+              <div className="flex items-center space-x-2 px-3 py-2 bg-neobanka-teal-500/20 border border-neobanka-teal-500 rounded">
+                <div className="w-2 h-2 bg-neobanka-teal-400 rounded-full"></div>
+                <span className="text-xs font-medium text-neobanka-teal-300">LIVE</span>
               </div>
             </div>
           </div>
@@ -962,8 +986,22 @@ export function TradingTerminal({ onSymbolChange, variant = 'same', symbolSuffix
         {/* Top Row - Trading and Agents */}
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
           {/* Agents panel removed */}
-          <div className="bg-card border border-border rounded-lg p-4">
-            <div className="text-sm font-semibold mb-2">1H Candles ({symbol})</div>
+          <div className="bg-neobanka-black-400 border border-neobanka-teal-500 rounded-xl p-6">
+            <div className="flex items-center justify-between mb-4">
+              <div className="flex items-center gap-3">
+                <div className="w-8 h-8 bg-neobanka-teal-500 rounded-lg flex items-center justify-center">
+                  <Zap className="h-4 w-4 text-white" />
+                </div>
+                <div>
+                  <div className="text-sm font-bold text-white">1H Candles</div>
+                  <div className="text-xs text-neobanka-teal-400 font-mono">{symbol}</div>
+                </div>
+              </div>
+              <div className="flex items-center gap-2">
+                <div className="px-2 py-1 bg-neobanka-teal-500/20 border border-neobanka-teal-500 rounded text-xs text-neobanka-teal-300">1H</div>
+                <div className="w-2 h-2 bg-green-400 rounded-full"></div>
+              </div>
+            </div>
             <Candlestick data={candles} height={300} />
           </div>
           <TradingPanel
@@ -1033,23 +1071,23 @@ export function TradingTerminal({ onSymbolChange, variant = 'same', symbolSuffix
       </div>
 
       {/* Status Footer */}
-      <div className="bg-muted/30 border border-border rounded-lg p-3 mt-6">
+      <div className="bg-gradient-to-r from-neobanka-blue-50/50 to-neobanka-gold-50/50 border border-neobanka-blue-200 rounded-xl p-4 mt-6 shadow-sm">
         <div className="flex items-center justify-between text-sm">
           <div className="flex items-center space-x-6">
             <div className="flex items-center space-x-2">
-              <div className={`w-2 h-2 rounded-full ${isConnected && isOnHederaTestnet ? 'bg-green-500' : 'bg-red-500'}`}></div>
+              <div className={`w-3 h-3 rounded-full shadow-sm ${isConnected && isOnHederaTestnet ? 'bg-neobanka-success shadow-neobanka-success/20' : 'bg-neobanka-error shadow-neobanka-error/20'}`}></div>
               <span className="text-muted-foreground">Network:</span>
-              <span className="font-medium">{isOnHederaTestnet ? 'Hedera Testnet' : 'Disconnected'}</span>
+              <span className="font-semibold text-neobanka-blue-700">{isOnHederaTestnet ? 'Hedera Testnet' : 'Disconnected'}</span>
             </div>
           </div>
           <div className="flex items-center space-x-6">
             <div className="flex items-center space-x-2">
-              <span className="text-muted-foreground">Orders:</span>
-              <span className="font-medium">{orderbook ? (orderbook.asks?.length || 0) + (orderbook.bids?.length || 0) : 0}</span>
+              <span className="text-muted-foreground">Active Orders:</span>
+              <span className="font-semibold text-neobanka-blue-700">{orderbook ? (orderbook.asks?.length || 0) + (orderbook.bids?.length || 0) : 0}</span>
             </div>
             <div className="flex items-center space-x-2">
               <span className="text-muted-foreground">Latency:</span>
-              <span className="font-medium">{isConnected ? '47ms' : '—'}</span>
+              <span className="font-mono font-semibold text-neobanka-gold-600">{isConnected ? '47ms' : '—'}</span>
             </div>
           </div>
         </div>

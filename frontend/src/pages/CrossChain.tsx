@@ -47,12 +47,14 @@ const CrossChain = () => {
     <div className="min-h-screen bg-background">
       <header className="border-b border-border bg-background">
         <div className="container flex h-16 items-center justify-between">
-          <div className="flex items-center gap-2">
-            <div className="w-8 h-8 bg-foreground rounded-sm flex items-center justify-center">
-              <span className="text-background font-bold text-sm">N</span>
+          <div className="flex items-center space-x-3">
+            <div className="w-10 h-10 bg-gradient-to-br from-neobanka-teal-500 to-neobanka-teal-600 rounded-lg flex items-center justify-center shadow-lg">
+              <span className="text-white font-bold text-lg">N</span>
             </div>
-            <h1 className="text-xl font-semibold">NeoBanka</h1>
-            <span className="text-sm text-muted-foreground ml-2">Cross-Chain</span>
+            <div>
+              <h1 className="text-xl font-bold bg-gradient-to-r from-neobanka-teal-400 to-neobanka-teal-500 bg-clip-text text-transparent">NeoBanka</h1>
+              <p className="text-xs text-muted-foreground font-medium">Cross-Chain Trading</p>
+            </div>
           </div>
           <WalletConnect />
         </div>

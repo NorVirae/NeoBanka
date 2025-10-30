@@ -52,10 +52,29 @@ export default {
 					DEFAULT: 'hsl(var(--warning))',
 					foreground: 'hsl(var(--warning-foreground))'
 				},
-				NeoBank: {
-					red: 'hsl(0 85% 60%)',
-					green: 'hsl(120 100% 65%)',
-					orange: 'hsl(25 95% 65%)'
+				neobanka: {
+					black: {
+						50: 'hsl(0 0% 15%)',
+						100: 'hsl(0 0% 12%)',
+						200: 'hsl(0 0% 10%)',
+						300: 'hsl(0 0% 8%)',
+						400: 'hsl(0 0% 6%)',
+						500: 'hsl(0 0% 4%)',
+						600: 'hsl(0 0% 3%)',
+						700: 'hsl(0 0% 2%)',
+						800: 'hsl(0 0% 1%)',
+						900: 'hsl(0 0% 0%)'
+					},
+					teal: {
+						300: 'hsl(180 25% 55%)',
+						400: 'hsl(180 25% 50%)',
+						500: 'hsl(180 25% 45%)',
+						600: 'hsl(180 25% 40%)',
+						700: 'hsl(180 25% 35%)'
+					},
+					success: 'hsl(120 100% 35%)',
+					warning: 'hsl(38 90% 50%)',
+					error: 'hsl(0 84% 60%)'
 				},
 				popover: {
 					DEFAULT: 'hsl(var(--popover))',
