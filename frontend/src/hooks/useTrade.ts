@@ -26,6 +26,7 @@ export interface OrderParams {
   toNetwork: string;
   receiveWallet: string;
   type?: 'limit' | 'market';
+  symbolOverride?: string;
 }
 
 export interface TradeResult {
@@ -52,21 +53,25 @@ export function useTrade() {
   // Cache contract code lookups to avoid repeated eth_getCode calls (rate limit friendly)
   const contractCodeCache = new Map<string, boolean>();
   
-  // Ensure wallet has enough HBAR for gas
-  const ensureSufficientHbar = async (minimumHbar: string = '0.001') => {
+  // Ensure wallet has enough native token for gas on current chain
+  const ensureSufficientNative = async (chainKey: 'hedera' | 'polygon') => {
     if (!account) throw new Error('Wallet not connected');
     let balance: bigint;
     try {
       if (!provider) throw new Error('no wallet provider');
       balance = await provider.getBalance(account);
     } catch (err: any) {
-      // Fallback to public RPC if wallet RPC circuit-breaker is open
       balance = await readonlyProvider.getBalance(account);
     }
-    console.log('BalancesdnsdJSHDD:  ', balance);
-    const minWei = ethers.parseEther(minimumHbar);
+    // Minimal safe buffer per chain (tunable)
+    const minByChain: Record<'hedera' | 'polygon', string> = {
+      hedera: '0.005', // HBAR
+      polygon: '0.05', // MATIC on Amoy
+    };
+    const minWei = ethers.parseEther(minByChain[chainKey]);
     if (balance < minWei) {
-      throw new Error('INSUFFICIENT_PAYER_BALANCE: Not enough HBAR to cover gas fees');
+      const sym = chainKey === 'hedera' ? 'HBAR' : 'MATIC';
+      throw new Error(`INSUFFICIENT_PAYER_BALANCE: Not enough ${sym} to cover gas fees`);
     }
   };
   
@@ -139,7 +144,47 @@ export function useTrade() {
     if (!provider) throw new Error('Wallet not connected');
     const net = await provider.getNetwork();
     if (Number(net.chainId) !== targetChainId) {
-      throw new Error(`Wrong network: please switch to chainId ${targetChainId}`);
+      throw new Error(`WRONG_NETWORK:${targetChainId}`);
+    }
+  };
+
+  // Attempt to switch chain in the user's wallet; add chain if missing
+  const switchOrAddNetwork = async (targetKey: 'hedera' | 'polygon') => {
+    if (!provider) throw new Error('Wallet not connected');
+    const target = CHAIN_REGISTRY[targetKey];
+    if (!target?.chainId) throw new Error(`Unknown network key: ${targetKey}`);
+    const hexChainId = '0x' + target.chainId.toString(16);
+    const anyProv: any = provider as any;
+    try {
+      await anyProv.send('wallet_switchEthereumChain', [{ chainId: hexChainId }]);
+      return true;
+    } catch (switchErr: any) {
+      // 4902 = chain not added to wallet
+      const notAdded = switchErr?.code === 4902 || /Unrecognized chain ID/i.test(String(switchErr?.message || ''));
+      if (!notAdded) throw switchErr;
+      // Try to add the chain
+      try {
+        const params = targetKey === 'hedera'
+          ? {
+              chainId: hexChainId,
+              chainName: 'Hedera Testnet',
+              nativeCurrency: { name: 'HBAR', symbol: 'HBAR', decimals: 18 },
+              rpcUrls: (HEDERA_TESTNET.rpcUrls as any) || [],
+              blockExplorerUrls: HEDERA_TESTNET.blockExplorerUrls as any,
+            }
+          : {
+              chainId: hexChainId,
+              chainName: 'Polygon Amoy Testnet',
+              nativeCurrency: { name: 'MATIC', symbol: 'MATIC', decimals: 18 },
+              rpcUrls: [CHAIN_REGISTRY.polygon.rpc].filter(Boolean),
+              blockExplorerUrls: ['https://www.oklink.com/amoy'] as any,
+            };
+        await anyProv.send('wallet_addEthereumChain', [params]);
+        await anyProv.send('wallet_switchEthereumChain', [{ chainId: hexChainId }]);
+        return true;
+      } catch (addErr) {
+        throw addErr;
+      }
     }
   };
 
@@ -173,8 +218,7 @@ export function useTrade() {
     if (!signer || !account) throw new Error('Wallet not connected');
 
     try {
-      // network ensured by caller
-      await ensureSufficientHbar();
+      // network and native balance ensured by caller
       await ensureErc20Contract(tokenAddress);
       const token = await getTokenContract(tokenAddress);
       const decimals = await getTokenDecimals(tokenAddress);
@@ -236,7 +280,7 @@ export function useTrade() {
     }
   };
 
-  const submitOrder = async (orderData: OrderParams): Promise<TradeResult> => {
+  const baseSubmit = async (orderData: OrderParams, useCrossEndpoint: boolean): Promise<TradeResult> => {
     if (!provider || !account) {
       throw new Error('Wallet not connected');
     }
@@ -252,8 +296,20 @@ export function useTrade() {
       const quoteTokenAddress = getTokenAddressForNetwork(orderData.toNetwork, orderData.quoteAsset);
       const settlementAddr = resolveSettlementAddress(escrowNetKey as 'hedera' | 'polygon');
       if (!settlementAddr) throw new Error(`Settlement address not set for ${escrowNetKey}`);
-      await ensureSufficientHbar();
-      await ensureNetwork(escrowChain.chainId);
+      // Try to auto-switch to the correct network for approvals/escrow
+      try {
+        await ensureNetwork(escrowChain.chainId);
+      } catch (e: any) {
+        if (String(e?.message || '').startsWith('WRONG_NETWORK:')) {
+          await switchOrAddNetwork(escrowNetKey as 'hedera' | 'polygon');
+          // re-verify
+          await ensureNetwork(escrowChain.chainId);
+        } else {
+          throw e;
+        }
+      }
+      // Ensure native balance on the now-selected chain
+      await ensureSufficientNative(escrowNetKey as 'hedera' | 'polygon');
       console.log('Network + settlement used:', { escrowNetKey, chainId: escrowChain.chainId, settlementAddr, baseTokenAddress, quoteTokenAddress });
 
       // Verify backend and frontend use the same settlement address
@@ -303,7 +359,7 @@ export function useTrade() {
         const needed = requiredAmount - escrowBalance.available;
         const neededFormatted = ethers.formatUnits(needed, decimals);
         console.log(`Step 3: Depositing ${neededFormatted} to escrow...`);
-        await depositToEscrow(tokenToUse, neededFormatted, settlementAddr, escrowChain.rpc);
+        await depositToEscrow(tokenToUse, neededFormatted, settlementAddr, escrowChain.rpc, escrowNetKey as 'hedera' | 'polygon');
         // Do not block on mirror-node updates; proceed to submit order
       } else {
         console.log('Step 3: Sufficient escrow balance, skipping deposit');
@@ -336,10 +392,14 @@ export function useTrade() {
         // @ts-ignore
         to_network: orderData.toNetwork,
         receiveWallet: orderData.receiveWallet,
+        // Separate order book when requested
+        ...(orderData.symbolOverride ? { symbol_override: orderData.symbolOverride } : {}),
       };
 
       console.log('Step 5: Submitting order to orderbook...');
-      const response = await orderbookApi.registerOrder(apiOrderData);
+      const response = useCrossEndpoint
+        ? await orderbookApi.registerOrderCross(apiOrderData)
+        : await orderbookApi.registerOrder(apiOrderData);
 
       if (response.status_code === 1) {
         console.log('Order submitted successfully!');
@@ -370,11 +430,16 @@ export function useTrade() {
     }
   };
 
+  const submitOrder = async (orderData: OrderParams): Promise<TradeResult> => baseSubmit(orderData, false);
+  const submitOrderCross = async (orderData: OrderParams): Promise<TradeResult> => baseSubmit(orderData, true);
+
   const checkBalance = async (asset: string, amount: string): Promise<boolean> => {
     if (!provider || !account) return false;
-
     try {
-      const tokenAddress = getTokenAddress(asset);
+      const net = await provider.getNetwork();
+      const chainKey: 'hedera' | 'polygon' = Number(net.chainId) === CHAIN_REGISTRY.polygon.chainId ? 'polygon' : 'hedera';
+      const tokenAddress = resolveTokenAddress(chainKey, asset);
+      if (!tokenAddress) return false;
       const token = await getTokenContract(tokenAddress);
       const decimals = await token.decimals();
       const balance = await token.balanceOf(account);
@@ -447,14 +512,16 @@ export function useTrade() {
     }
   };
 
-  const depositToEscrow = async (tokenAddress: string, amount: string, settlementAddr?: string, rpcOverride?: string): Promise<void> => {
+  const depositToEscrow = async (tokenAddress: string, amount: string, settlementAddr?: string, rpcOverride?: string, chainKey?: 'hedera' | 'polygon'): Promise<void> => {
     if (!signer || !account) throw new Error('Wallet not connected');
 
     setState(prev => ({ ...prev, loading: true, orderStatus: 'depositing' }));
     
     try {
-      // ensureNetwork is done by caller
-      await ensureSufficientHbar();
+      // ensureNetwork is done by caller; ensure native gas too if requested
+      if (chainKey) {
+        await ensureSufficientNative(chainKey);
+      }
       await ensureErc20Contract(tokenAddress);
       const decimals = await getTokenDecimals(tokenAddress);
       const parsedAmount = ethers.parseUnits(amount, decimals);
@@ -519,8 +586,10 @@ export function useTrade() {
     try {
       const decimals = await getTokenDecimals(tokenAddress);
       const parsedAmount = ethers.parseUnits(amount, decimals);
-
-      const settlement = await getSettlementContract();
+      const net = await provider!.getNetwork();
+      const chainKey: 'hedera' | 'polygon' = Number(net.chainId) === CHAIN_REGISTRY.polygon.chainId ? 'polygon' : 'hedera';
+      const settlementAddr = resolveSettlementAddress(chainKey);
+      const settlement = await getSettlementContract(settlementAddr);
       const withdrawTx = await settlement.withdrawFromEscrow(tokenAddress, parsedAmount, { gasLimit: 250000, gasPrice: ethers.parseUnits('1', 'gwei') });
       await withdrawTx.wait();
 
@@ -538,13 +607,17 @@ export function useTrade() {
 
   const getUserNonce = async (tokenAddress: string): Promise<bigint> => {
     if (!provider || !account) throw new Error('Wallet not connected');
-    const settlement = await getSettlementContract();
+    const net = await provider.getNetwork();
+    const chainKey: 'hedera' | 'polygon' = Number(net.chainId) === CHAIN_REGISTRY.polygon.chainId ? 'polygon' : 'hedera';
+    const settlementAddr = resolveSettlementAddress(chainKey);
+    const settlement = await getSettlementContract(settlementAddr);
     return await settlement.getUserNonce(account, tokenAddress);
   };
 
   return {
     ...state,
     submitOrder,
+    submitOrderCross,
     checkBalance,
     checkAndApproveToken,
     // Escrow management functions

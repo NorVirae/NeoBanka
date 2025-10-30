@@ -2,6 +2,8 @@
 import { TradingTerminal } from "../components/TradingTerminal";
 import { useEffect, useState } from "react";
 import { WalletConnect } from "../components/walletConnect";
+import { Link } from "react-router-dom";
+import { Button } from "@/components/ui/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 
 const Index = () => {
@@ -16,6 +18,7 @@ const Index = () => {
               <span className="text-background font-bold text-sm">N</span>
             </div>
             <h1 className="text-xl font-semibold">NeoBanka</h1>
+            <Link to="/crosschain"><Button variant="outline" size="sm">Cross-Chain</Button></Link>
           </div>
           <WalletConnect />
         </div>
@@ -23,12 +26,16 @@ const Index = () => {
 
       <main className="container mx-auto py-6">
         <Tabs defaultValue="trading" className="space-y-6">
-          <TabsList className="grid w-full grid-cols-3">
+          <TabsList className="grid w-full grid-cols-2 md:grid-cols-3">
             <TabsTrigger value="trading">Trading Terminal</TabsTrigger>
+            <TabsTrigger value="crosschain">Cross-Chain Terminal</TabsTrigger>
           </TabsList>
 
           <TabsContent value="trading" className="space-y-4">
             <TradingTerminal onSymbolChange={setSymbol} />
+          </TabsContent>
+          <TabsContent value="crosschain" className="space-y-4">
+            <TradingTerminal onSymbolChange={setSymbol} variant="cross" defaultFromNetwork="hedera" defaultToNetwork="polygon" />
           </TabsContent>
         </Tabs>
       </main>

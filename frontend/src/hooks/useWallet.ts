@@ -212,32 +212,20 @@ export const useWallet = () => {
       if (accounts && accounts.length > 0) {
         const currentChainId = await window.ethereum.request({ method: 'eth_chainId' });
         const currentChainIdNum = parseInt(currentChainId, 16);
-
-        // Only restore connection if on Hedera Testnet
-        if (currentChainIdNum === HEDERA_TESTNET.chainId) {
-          const provider = new ethers.BrowserProvider(window.ethereum);
-          const network = await provider.getNetwork();
-          const signer = await provider.getSigner();
-          const address = await signer.getAddress();
-          
-          setState({
-            account: address,
-            isConnected: true,
-            isConnecting: false,
-            chainId: Number(network.chainId),
-            provider,
-            signer,
-            isNetworkSwitching: false,
-          });
-        } else {
-          // Connected but wrong network - show as disconnected
-          console.warn(`Wallet connected to wrong network (${currentChainIdNum}), showing as disconnected`);
-          setState(prev => ({
-            ...prev,
-            isConnected: false,
-            account: null,
-          }));
-        }
+        // Restore connection regardless of chain to support cross-chain flows
+        const provider = new ethers.BrowserProvider(window.ethereum);
+        const network = await provider.getNetwork();
+        const signer = await provider.getSigner();
+        const address = await signer.getAddress();
+        setState({
+          account: address,
+          isConnected: true,
+          isConnecting: false,
+          chainId: Number(network.chainId),
+          provider,
+          signer,
+          isNetworkSwitching: false,
+        });
       }
     } catch (error) {
       console.error('Error checking connection:', error);
@@ -267,35 +255,21 @@ export const useWallet = () => {
   const handleChainChanged = useCallback(async (chainId: string) => {
     console.log('Chain changed to:', chainId);
     const newChainId = parseInt(chainId, 16);
-    
-    if (newChainId !== HEDERA_TESTNET.chainId) {
-      console.warn('User switched away from Hedera Testnet, disconnecting...');
-
-      // Show warning and disconnect
-      setTimeout(() => {
-        alert('This app only works on Hedera Testnet. Please switch back to Hedera Testnet and reconnect.');
-      }, 500);
-      
+    try {
+      const provider = new ethers.BrowserProvider(window.ethereum);
+      const signer = await provider.getSigner();
+      const address = await signer.getAddress();
+      setState(prev => ({
+        ...prev,
+        chainId: newChainId,
+        provider,
+        signer,
+        account: address,
+        isConnected: true,
+      }));
+    } catch (error) {
+      console.error('Error handling chain change:', error);
       disconnect();
-    } else {
-      // User switched to Hedera testnet, update state
-      try {
-        const provider = new ethers.BrowserProvider(window.ethereum);
-        const signer = await provider.getSigner();
-        const address = await signer.getAddress();
-
-        setState(prev => ({
-          ...prev,
-          chainId: newChainId,
-          provider,
-          signer,
-          account: address,
-          isConnected: true,
-        }));
-      } catch (error) {
-        console.error('Error handling chain change to Hedera:', error);
-        disconnect();
-      }
     }
   }, [disconnect]);
 
