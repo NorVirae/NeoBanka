@@ -87,7 +87,11 @@ class APIService:
                 except Exception as e:
                     return JSONResponse(content={"message": f"Attach failed: {e}", "status_code": 0}, status_code=400)
 
-            # payload_json = json.loads(payload)
+            # Same-chain service: force same-network and use canonical symbol only
+            from_net = (payload_json.get("from_network") or payload_json.get("fromNetwork") or "").lower()
+            to_net = (payload_json.get("to_network") or payload_json.get("toNetwork") or "").lower()
+            if from_net and to_net and from_net != to_net:
+                return JSONResponse(content={"message": "Use /api/register_order_cross for cross-chain orders", "status_code": 0}, status_code=400)
             symbol = "%s_%s" % (payload_json["baseAsset"], payload_json["quoteAsset"])
 
             # Step 1: Validate order prerequisites (balance and allowance)
@@ -122,8 +126,8 @@ class APIService:
             _order = {
                 "type": payload_json.get("type", "limit"),
                 "trade_id": payload_json["account"],
-                "from_network": payload_json["from_network"],
-                "to_network": payload_json["to_network"],
+                "from_network": from_net or payload_json.get("from_network") or payload_json.get("fromNetwork"),
+                "to_network": to_net or payload_json.get("to_network") or payload_json.get("toNetwork"),
                 "receive_wallet": payload_json.get("receive_wallet")
                 or payload_json.get("receiveWallet"),
                 "account": payload_json["account"],
@@ -403,6 +407,250 @@ class APIService:
 
         except Exception as e:
             logger.error(f"Error in register_order: {e}")
+            raise HTTPException(status_code=500, detail=str(e))
+
+    async def register_order_cross(
+        self,
+        request: Request,
+        order_books,
+        WEB3PROVIDER,
+        TOKEN_ADDRESSES,
+        SUPPORTED_NETWORKS,
+        settlement_client,
+        TRADE_SETTLEMENT_CONTRACT_ADDRESS=None,
+        CONTRACT_ABI=None,
+        PRIVATE_KEY=None,
+        activity_log=None,
+        activity_file_path: str | None = None,
+        append_file=None,
+        order_signatures: dict | None = None,
+    ):
+        try:
+            payload_json = await APIHelper.handlePayloadJson(request)
+
+            # Cross-chain service: require different networks and use canonical symbol only
+            from_net = (payload_json.get("from_network") or payload_json.get("fromNetwork") or "").lower()
+            to_net = (payload_json.get("to_network") or payload_json.get("toNetwork") or "").lower()
+            if not from_net or not to_net or from_net == to_net:
+                return JSONResponse(content={"message": "Cross-chain orders require different from/to networks", "status_code": 0}, status_code=400)
+            symbol = "%s_%s" % (payload_json["baseAsset"], payload_json["quoteAsset"])
+
+            # Validate order prerequisites
+            validation_result = await APIHelper.validate_order_prerequisites(
+                order_data=payload_json,
+                SUPPORTED_NETWORKS=SUPPORTED_NETWORKS,
+                TOKEN_ADDRESSES=TOKEN_ADDRESSES,
+                PRIVATE_KEY=PRIVATE_KEY,
+            )
+            if not validation_result["valid"]:
+                return JSONResponse(
+                    content={
+                        "message": "Order validation failed",
+                        "errors": validation_result.get("errors", []),
+                        "validation_details": validation_result.get("checks", {}),
+                        "status_code": 0,
+                    },
+                    status_code=400,
+                )
+
+            # Process in cross-chain order book
+            if symbol not in order_books:
+                order_books[symbol] = OrderBook()
+            order_book = order_books[symbol]
+
+            _order = {
+                "type": payload_json.get("type", "limit"),
+                "trade_id": payload_json["account"],
+                "from_network": from_net,
+                "to_network": to_net,
+                "receive_wallet": payload_json.get("receive_wallet") or payload_json.get("receiveWallet"),
+                "account": payload_json["account"],
+                "price": Decimal(payload_json["price"]),
+                "quantity": Decimal(payload_json["quantity"]),
+                "side": payload_json["side"],
+                "baseAsset": payload_json["baseAsset"],
+                "quoteAsset": payload_json["quoteAsset"],
+                "private_key": payload_json.get("privateKey") or payload_json.get("private_key") or None,
+            }
+
+            process_result = order_book.process_order(_order, False, False)
+            if not process_result["success"]:
+                return JSONResponse(content={"message": process_result["data"], "status_code": 0}, status_code=400)
+
+            trades, order, task_id, next_best_order = process_result["data"]
+            if order is None:
+                order = _order.copy()
+                order["order_id"] = 1
+
+            # Convert trades
+            converted_trades = []
+            client_sig1 = payload_json.get("signature1") or payload_json.get("signature_1")
+            client_sig2 = payload_json.get("signature2") or payload_json.get("signature_2")
+            for trade in trades:
+                party1 = [
+                    trade["party1"][0],
+                    trade["party1"][1],
+                    int(trade["party1"][2]) if trade["party1"][2] is not None else None,
+                    (float(trade["party1"][3]) if trade["party1"][3] is not None else None),
+                    trade["party1"][4],
+                    trade["party1"][5] if len(trade["party1"]) > 5 else None,
+                    trade["party1"][6] if len(trade["party1"]) > 6 else None,
+                    trade["party1"][7] if len(trade["party1"]) > 7 else None,
+                ]
+                party2 = [
+                    trade["party2"][0],
+                    trade["party2"][1],
+                    int(trade["party2"][2]) if trade["party2"][2] is not None else None,
+                    (float(trade["party2"][3]) if trade["party2"][3] is not None else None),
+                    trade["party2"][4],
+                    trade["party2"][5] if len(trade["party2"]) > 5 else None,
+                    trade["party2"][6] if len(trade["party2"]) > 6 else None,
+                    trade["party2"][7] if len(trade["party2"]) > 7 else None,
+                ]
+                converted_trade = {
+                    "timestamp": int(trade["timestamp"]),
+                    "price": float(trade["price"]),
+                    "quantity": float(trade["quantity"]),
+                    "time": int(trade["time"]),
+                    "party1": party1,
+                    "party2": party2,
+                    **({"signature1": client_sig1} if client_sig1 else {}),
+                    **({"signature2": client_sig2} if client_sig2 else {}),
+                }
+                try:
+                    stored = (order_signatures or {}).get(str((order or {}).get("order_id")), {})
+                    sig_p1 = stored.get(str(party1[0]).lower())
+                    sig_p2 = stored.get(str(party2[0]).lower())
+                    if sig_p1 and not converted_trade.get("signature1"):
+                        converted_trade["signature1"] = sig_p1
+                    if sig_p2 and not converted_trade.get("signature2"):
+                        converted_trade["signature2"] = sig_p2
+                except Exception:
+                    pass
+                converted_trades.append(converted_trade)
+
+            order_dict = {
+                "orderId": int(order["order_id"]),
+                "account": order["account"],
+                "price": float(order["price"]),
+                "quantity": float(order["quantity"]),
+                "side": order["side"],
+                "baseAsset": order["baseAsset"],
+                "quoteAsset": order["quoteAsset"],
+                "trade_id": order["trade_id"],
+                "trades": converted_trades,
+                "isValid": True if order["order_id"] != 0 else True,
+                "timestamp": order["timestamp"],
+            }
+
+            # Log placement into cross activity
+            try:
+                placement = {
+                    "type": "order_placed",
+                    "symbol": symbol,
+                    "orderId": order_dict["orderId"],
+                    "account": order_dict["account"],
+                    "side": order_dict["side"],
+                    "price": order_dict["price"],
+                    "quantity": order_dict["quantity"],
+                    "timestamp": order_dict["timestamp"],
+                }
+                if activity_log is not None:
+                    activity_log.append(placement)
+                if append_file is not None:
+                    append_file(placement)
+            except Exception:
+                pass
+
+            # Settle trades synchronously
+            settlement_info = {"settled": False}
+            if converted_trades:
+                try:
+                    settlement_info = await APIHelper.settle_trades_if_any(
+                        order_dict,
+                        SUPPORTED_NETWORKS,
+                        TRADE_SETTLEMENT_CONTRACT_ADDRESS,
+                        CONTRACT_ABI,
+                        PRIVATE_KEY,
+                        TOKEN_ADDRESSES,
+                        settlement_client,
+                        REQUIRE_CLIENT_SIGNATURES=False,
+                    )
+                except Exception as e:
+                    settlement_info = {"settled": False, "error": str(e)}
+
+                ok = bool(settlement_info.get("settled")) and (
+                    settlement_info.get("successful_settlements", 0) >= len(converted_trades)
+                )
+                if not ok:
+                    try:
+                        if order and order.get("order_id"):
+                            order_book.cancel_order(order.get("side"), order.get("order_id"))
+                    except Exception:
+                        pass
+                    return JSONResponse(
+                        content={
+                            "message": "On-chain settlement failed; order not accepted",
+                            "order": None,
+                            "status_code": 0,
+                            "settlement_info": settlement_info,
+                        },
+                        status_code=400,
+                    )
+                else:
+                    try:
+                        results = (settlement_info or {}).get("settlement_results") or []
+                        for idx, tr in enumerate(converted_trades):
+                            tr_ok = True
+                            try:
+                                tr_ok = bool((results[idx] or {}).get("settlement_result", {}).get("success", True))
+                            except Exception:
+                                tr_ok = True
+                            if not tr_ok:
+                                continue
+                            res_entry = {}
+                            try:
+                                res_entry = (results[idx] or {}).get("settlement_result", {})
+                            except Exception:
+                                res_entry = {}
+                            src = (res_entry.get("source_chain") or {})
+                            dst = (res_entry.get("destination_chain") or {})
+                            src_hash = src.get("transaction_hash")
+                            dst_hash = dst.get("transaction_hash")
+                            rec = {
+                                "type": "trade_executed",
+                                "symbol": symbol,
+                                "price": float(tr["price"]),
+                                "quantity": float(tr["quantity"]),
+                                "timestamp": int(tr["timestamp"]),
+                            }
+                            if src_hash and not dst_hash:
+                                rec["txHash"] = src_hash
+                            if src_hash:
+                                rec["txHashSource"] = src_hash
+                            if dst_hash:
+                                rec["txHashDestination"] = dst_hash
+                            if activity_log is not None:
+                                activity_log.append(rec)
+                            if append_file is not None:
+                                append_file(rec)
+                    except Exception:
+                        pass
+
+            return JSONResponse(
+                content={
+                    "message": "Order registered successfully",
+                    "order": order_dict,
+                    "nextBest": None,
+                    "taskId": 0,
+                    "validation_details": validation_result.get("checks", {}),
+                    "settlement_info": settlement_info,
+                    "status_code": 1,
+                },
+                status_code=200,
+            )
+        except Exception as e:
+            logger.error(f"Error in register_order_cross: {e}")
             raise HTTPException(status_code=500, detail=str(e))
 
     async def cancel_order(self, request: Request, order_books, activity_log=None, activity_file_path: str | None = None, append_file=None):
