@@ -26,7 +26,7 @@ import { useWallet } from '../hooks/useWallet';
 import { orderbookApi } from '../lib/api';
 import { useTrade } from '../hooks/useTrade';
 import { useToast } from './ui/use-toast';
-import { resolveSettlementAddress } from '../lib/contracts';
+import { resolveSettlementAddress, CHAIN_REGISTRY, HEDERA_TESTNET } from '../lib/contracts';
 import { priceService, type PriceData, PriceService } from '../lib/priceService';
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, ResponsiveContainer, Tooltip } from 'recharts';
 import LabelTerminal from './ui/label-terminal';
@@ -230,6 +230,52 @@ const TradingPanel = ({ account, onOrderSubmit, loading, fromNetwork, toNetwork,
   const [marketPrice, setMarketPrice] = useState<PriceData | null>(null);
   const [autoUpdatePrice, setAutoUpdatePrice] = useState(true);
   const [receiveWallet, setReceiveWallet] = useState<string>(account || '');
+  const [isSwitching, setIsSwitching] = useState(false);
+
+  // Quick toggle: switch MetaMask to the selected from-network (where approvals/deposits happen)
+  const switchOrAddNetwork = async (targetKey: 'hedera' | 'polygon' | 'ethereum') => {
+    const eth: any = (window as any).ethereum;
+    if (!eth || !eth.request) return;
+    try {
+      setIsSwitching(true);
+      const target = CHAIN_REGISTRY[targetKey];
+      const hexChainId = '0x' + target.chainId.toString(16);
+      await eth.request({ method: 'wallet_switchEthereumChain', params: [{ chainId: hexChainId }] });
+    } catch (switchErr: any) {
+      // If not added, add then switch
+      const needsAdd = switchErr?.code === 4902 || /Unrecognized chain ID/i.test(String(switchErr?.message || ''));
+      if (!needsAdd) throw switchErr;
+      const params = targetKey === 'hedera'
+        ? {
+            chainId: '0x' + CHAIN_REGISTRY.hedera.chainId.toString(16),
+            chainName: HEDERA_TESTNET.chainName,
+            nativeCurrency: HEDERA_TESTNET.nativeCurrency as any,
+            rpcUrls: (HEDERA_TESTNET.rpcUrls as any) || [],
+            blockExplorerUrls: HEDERA_TESTNET.blockExplorerUrls as any,
+          }
+        : targetKey === 'polygon'
+        ? {
+            chainId: '0x' + CHAIN_REGISTRY.polygon.chainId.toString(16),
+            chainName: 'Polygon Mainnet',
+            nativeCurrency: { name: 'MATIC', symbol: 'MATIC', decimals: 18 },
+            rpcUrls: [CHAIN_REGISTRY.polygon.rpc].filter(Boolean),
+            blockExplorerUrls: ['https://polygonscan.com/'] as any,
+          }
+        : {
+            chainId: '0x' + CHAIN_REGISTRY.ethereum.chainId.toString(16),
+            chainName: 'Ethereum Sepolia',
+            nativeCurrency: { name: 'ETH', symbol: 'ETH', decimals: 18 },
+            rpcUrls: [CHAIN_REGISTRY.ethereum.rpc].filter(Boolean),
+            blockExplorerUrls: ['https://sepolia.etherscan.io'] as any,
+          };
+      await eth.request({ method: 'wallet_addEthereumChain', params: [params] });
+      await eth.request({ method: 'wallet_switchEthereumChain', params: [{ chainId: params.chainId }] });
+    } finally {
+      setIsSwitching(false);
+    }
+  };
+
+  const isQuickActive = (from: string, to: string) => (fromNetwork === from && toNetwork === to);
 
   // Subscribe to price updates
   useEffect(() => {
@@ -330,10 +376,42 @@ const TradingPanel = ({ account, onOrderSubmit, loading, fromNetwork, toNetwork,
           {/* Cross-chain leg quick toggles (cross variant only) */}
           {variant === 'cross' && (
             <div className="grid grid-cols-2 gap-2">
-              <Button type="button" variant="outline" size="sm" onClick={() => { setFromNetwork('hedera'); setToNetwork('polygon'); }}>Hedera → Polygon</Button>
-              <Button type="button" variant="outline" size="sm" onClick={() => { setFromNetwork('polygon'); setToNetwork('hedera'); }}>Polygon → Hedera</Button>
-              <Button type="button" variant="outline" size="sm" onClick={() => { setFromNetwork('ethereum'); setToNetwork('polygon'); }}>Ethereum → Polygon</Button>
-              <Button type="button" variant="outline" size="sm" onClick={() => { setFromNetwork('polygon'); setToNetwork('ethereum'); }}>Polygon → Ethereum</Button>
+              <Button
+                type="button"
+                variant={isQuickActive('hedera','polygon') ? 'default' : 'outline'}
+                size="sm"
+                disabled={isSwitching}
+                onClick={async () => { setFromNetwork('hedera'); setToNetwork('polygon'); try { await switchOrAddNetwork('hedera'); } catch {} }}
+              >
+                Hedera → Polygon
+              </Button>
+              <Button
+                type="button"
+                variant={isQuickActive('polygon','hedera') ? 'default' : 'outline'}
+                size="sm"
+                disabled={isSwitching}
+                onClick={async () => { setFromNetwork('polygon'); setToNetwork('hedera'); try { await switchOrAddNetwork('polygon'); } catch {} }}
+              >
+                Polygon → Hedera
+              </Button>
+              <Button
+                type="button"
+                variant={isQuickActive('ethereum','polygon') ? 'default' : 'outline'}
+                size="sm"
+                disabled={isSwitching}
+                onClick={async () => { setFromNetwork('ethereum'); setToNetwork('polygon'); try { await switchOrAddNetwork('ethereum'); } catch {} }}
+              >
+                Ethereum → Polygon
+              </Button>
+              <Button
+                type="button"
+                variant={isQuickActive('polygon','ethereum') ? 'default' : 'outline'}
+                size="sm"
+                disabled={isSwitching}
+                onClick={async () => { setFromNetwork('polygon'); setToNetwork('ethereum'); try { await switchOrAddNetwork('polygon'); } catch {} }}
+              >
+                Polygon → Ethereum
+              </Button>
             </div>
           )}
 
@@ -672,7 +750,7 @@ const PriceChartPanel = ({ symbol }) => {
 };
 
 // Main Trading Terminal Component
-export function TradingTerminal({ onSymbolChange, variant = 'same', symbolSuffix = '', defaultFromNetwork, defaultToNetwork }: { onSymbolChange?: (s: string) => void; variant?: 'same' | 'cross'; symbolSuffix?: string; defaultFromNetwork?: string; defaultToNetwork?: string; }) {
+export function TradingTerminal({ onSymbolChange, variant = 'same', symbolSuffix = '', defaultFromNetwork, defaultToNetwork, useTradeImpl }: { onSymbolChange?: (s: string) => void; variant?: 'same' | 'cross'; symbolSuffix?: string; defaultFromNetwork?: string; defaultToNetwork?: string; useTradeImpl?: () => any; }) {
   const {
     account,
     isConnected,
@@ -685,8 +763,10 @@ export function TradingTerminal({ onSymbolChange, variant = 'same', symbolSuffix
   const [fromNetwork, setFromNetwork] = useState(defaultFromNetwork || 'hedera');
   const [toNetwork, setToNetwork] = useState(defaultToNetwork || 'hedera');
 
-  // Initialize trade hook at component level
-  const { submitOrder, submitOrderCross, orderStatus, loading: tradeLoading } = useTrade();
+  // Initialize trade hook (injectable for separation of concerns)
+  const trade = (typeof useTradeImpl === 'function' ? useTradeImpl() : useTrade());
+  const orderStatus = trade.orderStatus;
+  const tradeLoading = trade.loading;
   const { toast } = useToast();
 
   const [orderbook, setOrderbook] = useState(null);
@@ -786,9 +866,10 @@ export function TradingTerminal({ onSymbolChange, variant = 'same', symbolSuffix
       // no interval-based toasts; handled by orderStatus effect above
 
       // Submit the order (hook handles all prerequisites)
-      const result = variant === 'cross'
-        ? await submitOrderCross({ ...orderData })
-        : await submitOrder({ ...orderData });
+      const submitOrderFn = variant === 'cross'
+        ? (trade.submitOrderCross || trade.submitOrder)
+        : trade.submitOrder;
+      const result = await submitOrderFn({ ...orderData });
 
       // nothing
 

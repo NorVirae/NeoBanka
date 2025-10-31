@@ -116,9 +116,10 @@ export function useTrade() {
     return new ethers.Contract(settlementAddr, SETTLEMENT_ABI, ro);
   };
 
-  const getTokenContract = async (tokenAddress: string) => {
-    if (!signer) throw new Error('Wallet not connected');
-    return new ethers.Contract(tokenAddress, ERC20_ABI, signer);
+  const getTokenContract = async (tokenAddress: string, freshSigner?: ethers.Signer) => {
+    const useSigner = freshSigner || signer;
+    if (!useSigner) throw new Error('Wallet not connected');
+    return new ethers.Contract(tokenAddress, ERC20_ABI, useSigner);
   };
   const getTokenReadonly = (tokenAddress: string) => new ethers.Contract(tokenAddress, ERC20_ABI, readonlyProvider);
 
@@ -255,17 +256,21 @@ export function useTrade() {
   };
 
   // Ensure the token address is a deployed contract on this network
-  const ensureErc20Contract = async (tokenAddress: string) => {
-    const code = await (async () => {
-      try {
-        if (!provider) throw new Error('no wallet provider');
-        return await provider.getCode(tokenAddress);
-      } catch {
-        return await readonlyProvider.getCode(tokenAddress);
-      }
-    })();
+  const ensureErc20Contract = async (tokenAddress: string, rpcOverride?: string, chainKey?: 'hedera' | 'polygon' | 'ethereum') => {
+    // Prefer explicit RPC for the target chain to avoid stale provider during network switches
+    let ro: ethers.Provider | null = null;
+    if (rpcOverride) {
+      ro = new ethers.JsonRpcProvider(rpcOverride);
+    } else if (chainKey) {
+      const rpc = CHAIN_REGISTRY[chainKey].rpc;
+      ro = rpc ? new ethers.JsonRpcProvider(rpc) : readonlyProvider;
+    } else {
+      ro = provider || readonlyProvider;
+    }
+    const code = await ro.getCode(tokenAddress);
     if (!code || code === '0x') {
-      throw new Error('Token contract not found on current network. Verify token address for Hedera Testnet');
+      const netName = chainKey || 'current';
+      throw new Error(`Token contract not found on ${netName} network. Verify token address and RPC`);
     }
   };
 
@@ -279,14 +284,34 @@ export function useTrade() {
   const checkAndApproveToken = async (
     tokenAddress: string,
     amount: string | number,
-    settlementAddrOverride?: string
+    settlementAddrOverride?: string,
+    rpcOverride?: string,
+    chainKey?: 'hedera' | 'polygon' | 'ethereum'
   ): Promise<boolean> => {
-    if (!signer || !account) throw new Error('Wallet not connected');
+    if (!account) throw new Error('Wallet not connected');
 
     try {
-      // network and native balance ensured by caller
-      await ensureErc20Contract(tokenAddress);
-      const token = await getTokenContract(tokenAddress);
+      // Ensure code via the target chain RPC to avoid wrong-network false negatives
+      await ensureErc20Contract(tokenAddress, rpcOverride, chainKey);
+
+      // Always construct a fresh BrowserProvider and signer post-switch to avoid NETWORK_ERROR (network changed)
+      const anyWindow: any = window as any;
+      const freshProvider = anyWindow.ethereum ? new ethers.BrowserProvider(anyWindow.ethereum) : provider;
+      const freshSigner = freshProvider ? await freshProvider.getSigner() : signer;
+      if (!freshSigner) throw new Error('Wallet not connected');
+
+      // Optional: sanity check chain
+      try {
+        const network = await freshProvider!.getNetwork();
+        if (chainKey) {
+          const expected = CHAIN_REGISTRY[chainKey].chainId;
+          if (Number(network.chainId) !== expected) {
+            throw new Error(`WRONG_NETWORK:${expected}`);
+          }
+        }
+      } catch {}
+
+      const token = await getTokenContract(tokenAddress, freshSigner);
       const decimals = await getTokenDecimals(tokenAddress);
       const amountStr = typeof amount === 'number' ? amount.toString() : amount;
       const requiredAmount = ethers.parseUnits(amountStr, decimals);
@@ -341,6 +366,18 @@ export function useTrade() {
       console.error('Approval error:', error);
       const hederaMsg = extractHederaErrorMessage(error);
       if (hederaMsg) throw new Error(hederaMsg);
+      // Retry once if network changed mid-approval
+      if ((error as any)?.code === 'NETWORK_ERROR' && /network changed/i.test(String((error as any)?.message || ''))) {
+        try {
+          const anyWindow: any = window as any;
+          const fp = anyWindow.ethereum ? new ethers.BrowserProvider(anyWindow.ethereum) : provider;
+          await fp?.getNetwork(); // force resolve
+        } catch {}
+        // One quick retry with fresh signer
+        try {
+          return await checkAndApproveToken(tokenAddress, amount, settlementAddrOverride, rpcOverride, chainKey);
+        } catch {}
+      }
       if (typeof (error as any)?.message === 'string') throw new Error((error as any).message);
       throw error as any;
     }
@@ -605,17 +642,20 @@ export function useTrade() {
       if (chainKey) {
         await ensureSufficientNative(chainKey);
       }
-      await ensureErc20Contract(tokenAddress);
+      await ensureErc20Contract(tokenAddress, rpcOverride, chainKey);
       const decimals = await getTokenDecimals(tokenAddress);
       const parsedAmount = ethers.parseUnits(amount, decimals);
 
       console.log(`Depositing ${amount} tokens to escrow...`);
 
-      // Ensure unlimited allowance before depositing
-      await checkAndApproveToken(tokenAddress, amount, settlementAddr);
+      // Ensure unlimited allowance before depositing on the correct network/provider
+      await checkAndApproveToken(tokenAddress, amount, settlementAddr, rpcOverride, chainKey as any);
 
-      // Then deposit to escrow with simulate + retry
-      const settlement = await getSettlementContract(settlementAddr!);
+      // Then deposit to escrow with simulate + retry, using a fresh signer to avoid network-changed
+      const anyWindow: any = window as any;
+      const freshProvider = anyWindow.ethereum ? new ethers.BrowserProvider(anyWindow.ethereum) : provider;
+      const freshSigner = freshProvider ? await freshProvider.getSigner() : signer!;
+      const settlement = new ethers.Contract(settlementAddr!, SETTLEMENT_ABI, freshSigner);
       console.log('Depositing to escrow contract...');
       try {
         // Simulate to surface revert reasons early (ethers v6)
