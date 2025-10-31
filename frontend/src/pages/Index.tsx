@@ -1,5 +1,6 @@
 // src/pages/Index.tsx - VERSION FINALE
-import { TradingTerminal } from "../components/TradingTerminal";
+import { TradingTerminalSame } from "../components/TradingTerminalSame";
+import { TradingTerminalCross } from "../components/TradingTerminalCross";
 import { useState } from "react";
 import { WalletConnect } from "../components/walletConnect";
 import { Link } from "react-router-dom";
@@ -37,10 +38,10 @@ const Index = () => {
           </TabsList>
 
           <TabsContent value="trading" className="space-y-4">
-            <TradingTerminal onSymbolChange={setSymbol} />
+            <TradingTerminalSame onSymbolChange={setSymbol} />
           </TabsContent>
           <TabsContent value="crosschain" className="space-y-4">
-            <TradingTerminal onSymbolChange={setSymbol} variant="cross" defaultFromNetwork="hedera" defaultToNetwork="polygon" />
+            <TradingTerminalCross onSymbolChange={setSymbol} />
           </TabsContent>
         </Tabs>
       </main>

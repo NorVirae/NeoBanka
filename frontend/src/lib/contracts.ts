@@ -26,8 +26,8 @@ export const CHAIN_REGISTRY = {
     },
   },
   polygon: {
-    chainId: Number(env.VITE_POLYGON_CHAIN_ID) || 80002,
-    rpc: env.VITE_POLYGON_RPC || "https://rpc-amoy.polygon.technology",
+    chainId: Number(env.VITE_POLYGON_CHAIN_ID) || 137,
+    rpc: env.VITE_POLYGON_RPC || "https://polygon-rpc.com",
     settlement: env.VITE_POLYGON_SETTLEMENT || "",
     tokens: {
       HBAR: env.VITE_POLYGON_HBAR || "",
