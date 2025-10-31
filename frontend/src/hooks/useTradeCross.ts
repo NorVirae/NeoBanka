@@ -16,8 +16,8 @@ export interface OrderParamsCross {
   price: string;
   quantity: string;
   side: 'bid' | 'ask';
-  fromNetwork: 'hedera' | 'polygon';
-  toNetwork: 'hedera' | 'polygon';
+  fromNetwork: 'hedera' | 'ethereum';
+  toNetwork: 'hedera' | 'ethereum';
   receiveWallet: string;
   type?: 'limit' | 'market';
 }
@@ -61,7 +61,7 @@ export function useTradeCross() {
     throw lastErr || new Error(`WRONG_NETWORK:${targetChainId}`);
   };
 
-  const switchOrAddNetwork = async (targetKey: 'hedera' | 'polygon') => {
+  const switchOrAddNetwork = async (targetKey: 'hedera' | 'ethereum') => {
     if (!provider) throw new Error('Wallet not connected');
     const target = CHAIN_REGISTRY[targetKey];
     const hexChainId = '0x' + target.chainId.toString(16);
@@ -71,7 +71,7 @@ export function useTradeCross() {
       if (e?.code !== 4902) throw e;
       const params = targetKey === 'hedera'
         ? { chainId: hexChainId, chainName: 'Hedera Testnet', nativeCurrency: { name: 'HBAR', symbol: 'HBAR', decimals: 18 }, rpcUrls: HEDERA_TESTNET.rpcUrls as any, blockExplorerUrls: HEDERA_TESTNET.blockExplorerUrls as any }
-        : { chainId: hexChainId, chainName: 'Polygon Amoy Testnet', nativeCurrency: { name: 'MATIC', symbol: 'MATIC', decimals: 18 }, rpcUrls: [CHAIN_REGISTRY.polygon.rpc], blockExplorerUrls: ['https://www.oklink.com/amoy'] as any };
+        : { chainId: hexChainId, chainName: 'Ethereum Sepolia', nativeCurrency: { name: 'ETH', symbol: 'ETH', decimals: 18 }, rpcUrls: [CHAIN_REGISTRY.ethereum.rpc], blockExplorerUrls: ['https://sepolia.etherscan.io'] as any };
       await anyProv.send('wallet_addEthereumChain', [params]);
       await anyProv.send('wallet_switchEthereumChain', [{ chainId: hexChainId }]);
     }
@@ -119,12 +119,35 @@ export function useTradeCross() {
     if (!provider || !account) throw new Error('Wallet not connected');
     setState(prev => ({ ...prev, loading: true, error: null, orderStatus: 'idle' }));
     try {
-      // Determine which chain needs approval/escrow
-      const escrowNetKey: 'hedera' | 'polygon' = orderData.side === 'ask' ? orderData.fromNetwork : orderData.toNetwork;
+      // Always perform approval/escrow on the from network, regardless of side
+      const escrowNetKey: 'hedera' | 'ethereum' = orderData.fromNetwork;
       const chain = CHAIN_REGISTRY[escrowNetKey];
       const settlementAddr = resolveSettlementAddress(escrowNetKey);
-      const baseTokenAddress = resolveTokenAddress(orderData.fromNetwork, orderData.baseAsset);
-      const quoteTokenAddress = resolveTokenAddress(orderData.toNetwork, orderData.quoteAsset);
+      const baseTokenAddressFrom = resolveTokenAddress(orderData.fromNetwork, orderData.baseAsset);
+      const quoteTokenAddressFrom = resolveTokenAddress(orderData.fromNetwork, orderData.quoteAsset);
+      if (settlementAddr.toLowerCase() === baseTokenAddressFrom.toLowerCase() || settlementAddr.toLowerCase() === quoteTokenAddressFrom.toLowerCase()) {
+        throw new Error(`CONFIG_ERROR: Settlement address (${settlementAddr}) matches a token address on ${escrowNetKey}. Update your env to the correct settlement.`);
+      }
+      if (!baseTokenAddressFrom) {
+        throw new Error(`CONFIG_ERROR: Token ${orderData.baseAsset} not configured on ${orderData.fromNetwork}`);
+      }
+      if (!quoteTokenAddressFrom) {
+        throw new Error(`CONFIG_ERROR: Token ${orderData.quoteAsset} not configured on ${orderData.fromNetwork}`);
+      }
+
+      // Debug: Log settlement and token addresses used for submit
+      try {
+        console.log('Submit (cross) — addresses', {
+          escrowNetKey,
+          chainId: chain?.chainId,
+          settlementAddr,
+          baseTokenAddress: baseTokenAddressFrom,
+          quoteTokenAddress: quoteTokenAddressFrom,
+          from: orderData.fromNetwork,
+          to: orderData.toNetwork,
+          side: orderData.side,
+        });
+      } catch {}
 
       try { await ensureNetwork(chain.chainId); }
       catch (e: any) {
@@ -144,7 +167,7 @@ export function useTradeCross() {
       }
 
       const priceStr = String(orderData.price); const qtyStr = String(orderData.quantity);
-      const tokenToUse = orderData.side === 'ask' ? baseTokenAddress : quoteTokenAddress;
+      const tokenToUse = orderData.side === 'ask' ? baseTokenAddressFrom : quoteTokenAddressFrom;
       const decimals = await getTokenDecimals(tokenToUse);
       const requiredAmount = orderData.side === 'ask' ? ethers.parseUnits(qtyStr, decimals) : ethers.parseUnits((Number(qtyStr) * Number(priceStr)).toFixed(18), decimals);
 

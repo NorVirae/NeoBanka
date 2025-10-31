@@ -427,7 +427,6 @@ class APIService:
     ):
         try:
             payload_json = await APIHelper.handlePayloadJson(request)
-
             # Cross-chain service: require different networks and use canonical symbol only
             from_net = (payload_json.get("from_network") or payload_json.get("fromNetwork") or "").lower()
             to_net = (payload_json.get("to_network") or payload_json.get("toNetwork") or "").lower()

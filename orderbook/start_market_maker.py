@@ -32,8 +32,7 @@ def validate_environment():
     required_vars = [
         "PRIVATE_KEY",
         "HEDERA_SETTLEMENT",
-        "ETHEREUM_SETTLEMENT", 
-        "POLYGON_SETTLEMENT"
+        "ETHEREUM_SETTLEMENT"
     ]
     
     missing_vars = []
@@ -75,7 +74,7 @@ async def main():
     print(f"  Orderbook API: {os.getenv('ORDERBOOK_API_URL', 'http://localhost:8001')}")
     print(f"  Hedera Settlement: {os.getenv('HEDERA_SETTLEMENT')}")
     print(f"  Ethereum Settlement: {os.getenv('ETHEREUM_SETTLEMENT')}")
-    print(f"  Polygon Settlement: {os.getenv('POLYGON_SETTLEMENT')}")
+    # Polygon removed
     print(f"  Polling Interval: {os.getenv('POLLING_INTERVAL', '5')}s")
     print(f"  Price Tolerance: {os.getenv('MATCHING_TOLERANCE', '0.005')} (0.5%)")
     

@@ -61,8 +61,11 @@ def append_cross_activity_file(entry: dict):
 
 # Configuration - you should move these to environment variables
 # WEB3_PROVIDER = os.getenv("WEB3_PROVIDER", "https://your-ethereum-node.com")
-TRADE_SETTLEMENT_CONTRACT_ADDRESS = os.getenv(
-    "TRADE_SETTLE_CONTRACT_ADDRESS_HEDERA", "0x237458E2cF7593084Ae397a50166A275A3928bA7"
+# Prefer specific Hedera address, then generic fallback if provided
+TRADE_SETTLEMENT_CONTRACT_ADDRESS = (
+    os.getenv("TRADE_SETTLE_CONTRACT_ADDRESS_HEDERA")
+    or os.getenv("TRADE_SETTLE_CONTRACT_ADDRESS")
+    or "0x237458E2cF7593084Ae397a50166A275A3928bA7"
 )
 
 # Supported networks mapping. Each entry contains the RPC URL, the numeric
@@ -86,29 +89,31 @@ SUPPORTED_NETWORKS = {
         },
     },
     "ethereum": {
-        "rpc": os.getenv("WEB3_PROVIDER_ETHEREUM", "https://ethereum-sepolia-rpc.publicnode.com"),
-        "chain_id": int(os.getenv("WEB3_CHAIN_ID_ETHEREUM", "11155111")),
+        # Support both ETHEREUM_* and SEPOLIA_* naming; prefer explicit ETHEREUM_* if set
+        "rpc": os.getenv(
+            "WEB3_PROVIDER_ETHEREUM",
+            os.getenv("WEB3_PROVIDER_SEPOLIA", "https://ethereum-sepolia-rpc.publicnode.com"),
+        ),
+        "chain_id": int(
+            os.getenv("WEB3_CHAIN_ID_ETHEREUM", os.getenv("WEB3_CHAIN_ID_SEPOLIA", "11155111"))
+        ),
         "contract_address": os.getenv(
-            "TRADE_SETTLE_CONTRACT_ADDRESS_ETHEREUM", "0x10F0F2cb456BEd15655afB22ddd7d0EEE11FdBc9"
+            "TRADE_SETTLE_CONTRACT_ADDRESS_ETHEREUM",
+            os.getenv("TRADE_SETTLE_CONTRACT_ADDRESS_SEPOLIA", "0x10F0F2cb456BEd15655afB22ddd7d0EEE11FdBc9"),
         ),
         "tokens": {
-            "USDT": os.getenv("USDT_ETH_ADDRESS", "0x7169D38820dfd117C3FA1f22a697dBA58d90BA06"),
+            # Allow overriding USDT with SEPOLIA-specific variable if used
+            "USDT": os.getenv(
+                "USDT_ETH_ADDRESS",
+                os.getenv("SEPOLIA_USDT_TOKEN_ADDRESS", "0x7169D38820dfd117C3FA1f22a697dBA58d90BA06"),
+            ),
+
+            "HBAR": os.getenv(
+                "SEPOLIA_HBAR_TOKEN_ADDRESS",
+                os.getenv("SEPOLIA_HBAR_TOKEN_ADDRESS", "0xb458260166d1456A5ffB46eBbC4270738A515286"),
+            ),
             "xZAR": os.getenv("XZAR_ETH_ADDRESS", "0x48f07301e9e29c3c38a80ae8d9ae771f224f1054"),
             "cNGN": os.getenv("CNGN_ETH_ADDRESS", "0x17CDB2a01e7a34CbB3DD4b83260B05d0274C8dab"),
-        },
-    },
-    "polygon": {
-        "rpc": os.getenv("WEB3_PROVIDER_POLYGON", "https://rpc-amoy.polygon.technology"),
-        "chain_id": int(os.getenv("WEB3_CHAIN_ID_POLYGON", "80002")),
-        "contract_address": os.getenv(
-            "TRADE_SETTLE_CONTRACT_ADDRESS_POLYGON", TRADE_SETTLEMENT_CONTRACT_ADDRESS
-        ),
-        "tokens": {
-            # Defaults can be Amoy or your own deployments; override in env for mainnet/testnet
-            "HBAR": os.getenv("POLYGON_HBAR_TOKEN_ADDRESS", "0x41086d277f8A183A351310eC89d1AA9Dc1e67B7B"),
-            "USDT": os.getenv("POLYGON_USDT_TOKEN_ADDRESS", "0x750702AA1dE631277576602b780A38790c36E19e"),
-            "xZAR": os.getenv("XZAR_POLYGON_ADDRESS", "0x30DE46509Dbc3a491128F97be0aaf70dc7ff33cb"),
-            "cNGN": os.getenv("CNGN_POLYGON_ADDRESS", "0x52828daa48C1a9A06F37500882b42daf0bE04C3B"),
         },
     },
     "bsc": {
@@ -189,17 +194,11 @@ TOKEN_ADDRESSES = {
     "xZAR_ETH": os.getenv(
         "XZAR_ETH_ADDRESS", "0x48f07301e9e29c3c38a80ae8d9ae771f224f1054"
     ),
-    "xZAR_POLYGON": os.getenv(
-        "XZAR_POLYGON_ADDRESS", "0x30DE46509Dbc3a491128F97be0aaf70dc7ff33cb"
-    ),
     "cNGN_ETH": os.getenv(
         "CNGN_ETH_ADDRESS", "0x17CDB2a01e7a34CbB3DD4b83260B05d0274C8dab"
     ),
     "cNGN_BSC": os.getenv(
         "CNGN_BSC_ADDRESS", "0xa8AEA66B361a8d53e8865c62D142167Af28Af058"
-    ),
-    "cNGN_POLYGON": os.getenv(
-        "CNGN_POLYGON_ADDRESS", "0x52828daa48C1a9A06F37500882b42daf0bE04C3B"
     ),
     "cNGN_BASE": os.getenv(
         "CNGN_BASE_ADDRESS", "0x46C85152bFe9f96829aA94755D9f915F9B10EF5F"
@@ -316,10 +315,17 @@ async def get_trades_cross(request: Request):
 
 
 @app.get("/api/get_settlement_address")
-async def get_settlement_address():
-    return api_service.get_settlement_address(
-        TRADE_SETTLEMENT_CONTRACT_ADDRESS=TRADE_SETTLEMENT_CONTRACT_ADDRESS
-    )
+async def get_settlement_address(network: str | None = None):
+    try:
+        key = (network or "hedera").lower()
+        net = SUPPORTED_NETWORKS.get(key)
+        print(net, "NET IN GET SETTLEMENT ADDRESS", network)
+        if not net:
+            return {"status_code": 0, "message": f"unknown network {key}"}
+        addr = net.get("contract_address") or ""
+        return {"status_code": 1, "data": {"settlement_address": addr}}
+    except Exception as e:
+        return {"status_code": 0, "message": str(e)}
 
 
 @app.get("/api/networks")
@@ -440,6 +446,7 @@ async def order_history_cross(symbol: str | None = None, limit: int = 200):
     except Exception as e:
         logger.error(f"order_history_cross error: {e}")
         return {"status_code": 0, "message": str(e)}
+        
 # Add a health check endpoint for the settlement system
 @app.get("/api/settlement_health")
 async def settlement_health():
@@ -460,7 +467,6 @@ async def settle_trades(request: Request):
         TOKEN_ADDRESSES=TOKEN_ADDRESSES,
         settlement_client=settlement_client,
     )
-
 
 @app.post("/api/faucet")
 async def faucet(request: Request):

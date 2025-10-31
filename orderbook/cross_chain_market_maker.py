@@ -2,7 +2,7 @@
 """
 Cross-Chain Market Maker Bot for NeoBanka Orderbook
 
-This bot monitors orders across different networks (Hedera, Ethereum, Polygon)
+This bot monitors orders across different networks (Hedera, Ethereum)
 and facilitates cross-chain trading by:
 1. Monitoring orderbooks on each network
 2. Matching complementary orders across chains
@@ -36,8 +36,7 @@ logger = logging.getLogger(__name__)
 
 class NetworkType(Enum):
     HEDERA = "hedera"
-    ETHEREUM = "ethereum" 
-    POLYGON = "polygon"
+    ETHEREUM = "ethereum"
 
 @dataclass
 class CrossChainOrder:
@@ -77,11 +76,6 @@ class CrossChainMarketMaker:
                 "rpc": os.getenv("ETHEREUM_RPC_URL", "https://ethereum-sepolia-rpc.publicnode.com"),
                 "chain_id": 11155111,
                 "settlement": os.getenv("ETHEREUM_SETTLEMENT", "0x10F0F2cb456BEd15655afB22ddd7d0EEE11FdBc9")
-            },
-            NetworkType.POLYGON: {
-                "rpc": os.getenv("POLYGON_RPC_URL", "https://rpc-amoy.polygon.technology"),
-                "chain_id": 80002,
-                "settlement": os.getenv("POLYGON_SETTLEMENT", "0x6dA8b46231081C2C66331AD7e6e751D4Cb4a81f7")
             }
         }
         
@@ -159,8 +153,7 @@ class CrossChainMarketMaker:
             # Map network strings to NetworkType
             network_map = {
                 "hedera": NetworkType.HEDERA,
-                "ethereum": NetworkType.ETHEREUM,
-                "polygon": NetworkType.POLYGON
+                "ethereum": NetworkType.ETHEREUM
             }
             
             from_net = network_map.get(from_network)

@@ -82,8 +82,9 @@ export const orderbookApi = {
     });
     return await res.json();
   },
-  async getSettlementAddress(): Promise<{ status_code: number; data?: { settlement_address: string } }> {
-    const res = await fetch(`${ORDERBOOK_API_URL}/api/get_settlement_address`, {
+  async getSettlementAddress(network?: string): Promise<{ status_code: number; data?: { settlement_address: string } }> {
+    const qs = network ? `?network=${encodeURIComponent(network)}` : '';
+    const res = await fetch(`${ORDERBOOK_API_URL}/api/get_settlement_address${qs}`, {
       method: 'GET',
       headers: { 'Accept': 'application/json' },
       credentials: 'include',
