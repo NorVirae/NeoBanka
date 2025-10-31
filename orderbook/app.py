@@ -35,9 +35,14 @@ logging.basicConfig(level=logging.INFO, format=LOG_FORMAT, datefmt="%Y-%m-%d %H:
 logger = logging.getLogger(__name__)
 load_dotenv()
 
-order_books = {}  # Dictionary to store multiple order books, keyed by symbol
+order_books = {}  # Same-chain order books keyed by symbol
 activity_log = deque(maxlen=1000)
 ACTIVITY_LOG_PATH = os.getenv("ACTIVITY_LOG_PATH", "orderbook_activity.jsonl")
+
+# Cross-chain isolated state
+cross_order_books = {}  # Cross-chain order books keyed by symbol (same symbols, separate dict)
+cross_activity_log = deque(maxlen=1000)
+CROSS_ACTIVITY_LOG_PATH = os.getenv("CROSS_ACTIVITY_LOG_PATH", "orderbook_activity_cross.jsonl")
 order_signatures = {}
 
 def append_activity_file(entry: dict):
@@ -46,6 +51,13 @@ def append_activity_file(entry: dict):
             f.write(json.dumps(entry) + "\n")
     except Exception as e:
         logger.error(f"Failed to write activity file: {e}")
+
+def append_cross_activity_file(entry: dict):
+    try:
+        with open(CROSS_ACTIVITY_LOG_PATH, "a", encoding="utf-8") as f:
+            f.write(json.dumps(entry) + "\n")
+    except Exception as e:
+        logger.error(f"Failed to write cross activity file: {e}")
 
 # Configuration - you should move these to environment variables
 # WEB3_PROVIDER = os.getenv("WEB3_PROVIDER", "https://your-ethereum-node.com")
@@ -245,6 +257,30 @@ async def register_order(request: Request):
     )
 
 
+@app.post("/api/register_order_cross")
+async def register_order_cross(request: Request):
+    settlement_client = SettlementClient(
+        web3_provider=SUPPORTED_NETWORKS["hedera"]["rpc"],
+        contract_address=TRADE_SETTLEMENT_CONTRACT_ADDRESS,
+        private_key=PRIVATE_KEY,
+    )
+    return await api_service.register_order_cross(
+        request=request,
+        order_books=cross_order_books,
+        WEB3PROVIDER=SUPPORTED_NETWORKS["hedera"]["rpc"],
+        TOKEN_ADDRESSES=TOKEN_ADDRESSES,
+        SUPPORTED_NETWORKS=SUPPORTED_NETWORKS,
+        TRADE_SETTLEMENT_CONTRACT_ADDRESS=TRADE_SETTLEMENT_CONTRACT_ADDRESS,
+        CONTRACT_ABI=CONTRACT_ABI,
+        PRIVATE_KEY=PRIVATE_KEY,
+        settlement_client=settlement_client,
+        activity_log=cross_activity_log,
+        activity_file_path=CROSS_ACTIVITY_LOG_PATH,
+        append_file=append_cross_activity_file,
+        order_signatures=order_signatures,
+    )
+
+
 @app.post("/api/cancel_order")
 async def cancel_order(request: Request):
     return await api_service.cancel_order(
@@ -265,10 +301,18 @@ async def get_order(payload: str = Form(...)):
 async def get_orderbook(request: Request):
     return await api_service.get_orderbook(request=request, order_books=order_books)
 
+@app.post("/api/orderbook_cross")
+async def get_orderbook_cross(request: Request):
+    return await api_service.get_orderbook(request=request, order_books=cross_order_books)
+
 
 @app.post("/api/trades")
 async def get_trades(request: Request):
     return await api_service.get_trades(request=request, order_books=order_books)
+
+@app.post("/api/trades_cross")
+async def get_trades_cross(request: Request):
+    return await api_service.get_trades(request=request, order_books=cross_order_books)
 
 
 @app.get("/api/get_settlement_address")
@@ -368,6 +412,34 @@ async def order_history(symbol: str | None = None, limit: int = 200):
         logger.error(f"order_history error: {e}")
         return {"status_code": 0, "message": str(e)}
 
+# Cross-chain order history endpoint
+@app.get("/api/order_history_cross")
+async def order_history_cross(symbol: str | None = None, limit: int = 200):
+    try:
+        if not os.path.exists(CROSS_ACTIVITY_LOG_PATH):
+            return {"status_code": 1, "history": []}
+        items = []
+        with open(CROSS_ACTIVITY_LOG_PATH, "r", encoding="utf-8") as f:
+            for line in f:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    obj = json.loads(line)
+                except Exception:
+                    continue
+                t = obj.get("type")
+                if t not in ("order_placed", "order_cancelled", "trade_executed"):
+                    continue
+                if symbol and obj.get("symbol") != symbol:
+                    continue
+                items.append(obj)
+        if limit > 0:
+            items = items[-limit:]
+        return {"status_code": 1, "count": len(items), "history": items}
+    except Exception as e:
+        logger.error(f"order_history_cross error: {e}")
+        return {"status_code": 0, "message": str(e)}
 # Add a health check endpoint for the settlement system
 @app.get("/api/settlement_health")
 async def settlement_health():

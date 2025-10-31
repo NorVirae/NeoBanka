@@ -239,11 +239,29 @@ class APIHelper:
                 party2_to_network = trade["party2"][6] if len(trade["party2"]) > 6 else None
                 party2_receive_wallet = trade["party2"][7] if len(trade["party2"]) > 7 else party2_addr
 
-                # Resolve network configurations
-                source_network_cfg = SUPPORTED_NETWORKS.get(party1_from_network)
-                dest_network_cfg = SUPPORTED_NETWORKS.get(party2_from_network)
+                # Normalize roles so that party1 is always ASK (seller of base) on the SOURCE chain,
+                # and party2 is always BID (buyer with quote) on the DESTINATION chain.
+                ask_is_p1 = str(party1_side).lower() == "ask" and str(party2_side).lower() == "bid"
+                bid_is_p1 = str(party1_side).lower() == "bid" and str(party2_side).lower() == "ask"
+                if not (ask_is_p1 or bid_is_p1):
+                    settlement_results.append({
+                        "trade": trade,
+                        "settlement_result": {"success": False, "error": "invalid_sides"},
+                    })
+                    continue
 
-                logger.info(f"[{req_id}] Trade[{idx}] networks | source={party1_from_network} dest={party2_from_network}")
+                if ask_is_p1:
+                    ask_addr, ask_from_network, ask_to_network, ask_recv = party1_addr, party1_from_network, party1_to_network, party1_receive_wallet
+                    bid_addr, bid_from_network, bid_to_network, bid_recv = party2_addr, party2_from_network, party2_to_network, party2_receive_wallet
+                else:  # bid_is_p1
+                    ask_addr, ask_from_network, ask_to_network, ask_recv = party2_addr, party2_from_network, party2_to_network, party2_receive_wallet
+                    bid_addr, bid_from_network, bid_to_network, bid_recv = party1_addr, party1_from_network, party1_to_network, party1_receive_wallet
+
+                # Resolve network configurations using normalized roles
+                source_network_cfg = SUPPORTED_NETWORKS.get(ask_from_network)
+                dest_network_cfg = SUPPORTED_NETWORKS.get(bid_from_network)
+
+                logger.info(f"[{req_id}] Trade[{idx}] networks | source={ask_from_network} dest={bid_from_network}")
 
                 if not source_network_cfg or not dest_network_cfg:
                     settlement_results.append({
@@ -288,29 +306,29 @@ class APIHelper:
                 except Exception:
                     pass
 
-                # Get token addresses for the source chain (party1_from_network)
+                # Get token addresses for the source chain (ASK side network)
                 base_token_src = APIHelper.get_token_address(
                     order_dict["baseAsset"],
-                    party1_from_network,
+                    ask_from_network,
                     SUPPORTED_NETWORKS,
                     TOKEN_ADDRESSES,
                 )
                 quote_token_src = APIHelper.get_token_address(
                     order_dict["quoteAsset"],
-                    party1_from_network,
+                    ask_from_network,
                     SUPPORTED_NETWORKS,
                     TOKEN_ADDRESSES,
                 )
-                # Get token addresses for the destination chain (party2_from_network)
+                # Get token addresses for the destination chain (BID side network)
                 base_token_dest = APIHelper.get_token_address(
                     order_dict["baseAsset"],
-                    party2_from_network,
+                    bid_from_network,
                     SUPPORTED_NETWORKS,
                     TOKEN_ADDRESSES,
                 )
                 quote_token_dest = APIHelper.get_token_address(
                     order_dict["quoteAsset"],
-                    party2_from_network,
+                    bid_from_network,
                     SUPPORTED_NETWORKS,
                     TOKEN_ADDRESSES,
                 )
@@ -327,8 +345,8 @@ class APIHelper:
                             await asyncio.sleep(0.5 * (a + 1))
                     return last
 
-                nonce1 = await _retry_get_nonce(client_source, party1_addr, base_token_src)
-                nonce2 = await _retry_get_nonce(client_dest, party2_addr, base_token_dest)
+                nonce1 = await _retry_get_nonce(client_source, ask_addr, base_token_src)
+                nonce2 = await _retry_get_nonce(client_dest, bid_addr, base_token_dest)
                 logger.info(f"[{req_id}] Trade[{idx}] nonces | n1={nonce1} n2={nonce2}")
 
                 # Trade parameters
@@ -344,12 +362,10 @@ class APIHelper:
                     # Use a per-trade unique order id to avoid replay reverts on same-chain
                     base_order_id = str(order_dict["orderId"]).strip()
                     unique_order_id = f"{base_order_id}:{idx}:{timestamp}"
-                    # Normalize so party1 is seller (ask) on same-chain to avoid owner-as-buyer requiring quote escrow
-                    if str(party1_side).lower() == "bid" and str(party2_side).lower() == "ask":
-                        party1_addr, party2_addr = party2_addr, party1_addr
-                        party1_side, party2_side = party2_side, party1_side
-                        party1_receive_wallet, party2_receive_wallet = party2_receive_wallet, party1_receive_wallet
-                        nonce1, nonce2 = nonce2, nonce1
+                    # Ensure normalized order: party1=ask, party2=bid
+                    party1_addr, party2_addr = ask_addr, bid_addr
+                    party1_side, party2_side = "ask", "bid"
+                    party1_receive_wallet, party2_receive_wallet = ask_recv, bid_recv
                     logger.info(
                         f"[{req_id}] Trade[{idx}] same-chain settlement on chain_id={source_chain_id} | "
                         f"party1={party1_addr} side={party1_side} party2={party2_addr} side={party2_side}"
@@ -359,8 +375,8 @@ class APIHelper:
                     try:
                         base_needed = float(quantity)
                         quote_needed = float(quantity) * float(price)
-                        base_check = client_source.check_escrow_balance(party1_addr if str(party1_side).lower()=="ask" else party2_addr, base_token_src, token_decimals=18)
-                        quote_check = client_source.check_escrow_balance(party2_addr if str(party1_side).lower()=="ask" else party1_addr, quote_token_src, token_decimals=18)
+                        base_check = client_source.check_escrow_balance(ask_addr, base_token_src, token_decimals=18)
+                        quote_check = client_source.check_escrow_balance(bid_addr, quote_token_src, token_decimals=18)
                         base_avail = base_check.get("available", 0)
                         quote_avail = quote_check.get("available", 0)
                         if base_avail < base_needed:
@@ -404,13 +420,13 @@ class APIHelper:
                     # Settle on source chain (contract auto-locks)
                     logger.info(f"Settling on source chain (Chain ID: {source_chain_id})")
                     logger.info(
-                        f"[{req_id}] Trade[{idx}] settle source chain | party1={party1_addr} side={party1_side} party2={party2_addr} side={party2_side}"
+                        f"[{req_id}] Trade[{idx}] settle source chain | party1={ask_addr} side=ask party2={bid_addr} side=bid"
                     )
                     result_source = client_source.settle_cross_chain_trade(
-                        order_id, party1_addr, party2_addr,
-                        party1_receive_wallet, party2_receive_wallet,
+                        order_id, ask_addr, bid_addr,
+                        ask_recv, bid_recv,
                         base_token_src, quote_token_src, price, quantity,
-                        party1_side, party2_side,
+                        "ask", "bid",
                         source_chain_id, dest_chain_id,
                         timestamp, nonce1, nonce2,
                         is_source_chain=True
@@ -421,10 +437,10 @@ class APIHelper:
                     # Settle on destination chain (contract auto-locks)
                     logger.info(f"[{req_id}] Trade[{idx}] settle destination chain")
                     result_dest = client_dest.settle_cross_chain_trade(
-                        order_id, party1_addr, party2_addr,
-                        party1_receive_wallet, party2_receive_wallet,
+                        order_id, ask_addr, bid_addr,
+                        ask_recv, bid_recv,
                         base_token_dest, quote_token_dest, price, quantity,
-                        party1_side, party2_side,
+                        "ask", "bid",
                         source_chain_id, dest_chain_id,
                         timestamp, nonce1, nonce2,
                         is_source_chain=False
