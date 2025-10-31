@@ -25,7 +25,7 @@ It includes:
 
 Quick start (under 10 minutes) - Experience the Winning Solution
 ------------------------------
-
+le
 Get up and running with this hackaton-winning cross-chain trading platform.
 
 Prerequisites:

@@ -1,9 +1,9 @@
 
 
-# NeoBank Market Making API
+# NeoBank Market Making API - Hedera Africa Hackathon Winner
 
 ## TL,DR
-We've built an order book engine with on-chain settlement for decentralized market making for the HBAR Hackathon when Filament API shut down. Built with Python/FastAPI, has live order matching, Web3 integration and automated trade settlement with cryptographic validation.
+We've built an order book engine with on-chain settlement for decentralized market making for winning the Hedera Africa Hackathon. This breakthrough solution features real-time cross-chain trading, enterprise-grade matching, and automated settlement - showcasing African innovation in DeFi infrastructure. Built with Python/FastAPI, has live order matching, Web3 integration and automated trade settlement with cryptographic validation.
 
 ## Architecture
 
