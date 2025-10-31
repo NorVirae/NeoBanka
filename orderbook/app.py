@@ -107,6 +107,11 @@ SUPPORTED_NETWORKS = {
                 "USDT_ETH_ADDRESS",
                 os.getenv("SEPOLIA_USDT_TOKEN_ADDRESS", "0x7169D38820dfd117C3FA1f22a697dBA58d90BA06"),
             ),
+
+            "HBAR": os.getenv(
+                "SEPOLIA_HBAR_TOKEN_ADDRESS",
+                os.getenv("SEPOLIA_HBAR_TOKEN_ADDRESS", "0xb458260166d1456A5ffB46eBbC4270738A515286"),
+            ),
             "xZAR": os.getenv("XZAR_ETH_ADDRESS", "0x48f07301e9e29c3c38a80ae8d9ae771f224f1054"),
             "cNGN": os.getenv("CNGN_ETH_ADDRESS", "0x17CDB2a01e7a34CbB3DD4b83260B05d0274C8dab"),
         },

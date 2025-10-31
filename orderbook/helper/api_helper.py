@@ -46,11 +46,21 @@ class APIHelper:
                 return addr
         except Exception:
             pass
+        # Fallback to legacy map with network-specific keys first (e.g., USDT_ETH, XZAR_ETH)
         if TOKEN_ADDRESSES:
-            token_address = TOKEN_ADDRESSES.get(symbol_up, symbol)
-            print(token_address, "TOKEN_ADDRESS")
-            return token_address
-        return symbol
+            network_suffix = (network_key or "").upper()
+            if network_suffix:
+                key_with_net = f"{symbol_up}_{network_suffix}"
+                if key_with_net in TOKEN_ADDRESSES:
+                    token_address = TOKEN_ADDRESSES[key_with_net]
+                    print(token_address, "TOKEN_ADDRESS")
+                    return token_address
+            # Only allow generic fallback for Hedera to avoid cross-chain mis-resolution
+            if (network_key or "").lower() == "hedera":
+                token_address = TOKEN_ADDRESSES.get(symbol_up, "")
+                print(token_address, "TOKEN_ADDRESS")
+                return token_address or ""
+        return ""
 
     @staticmethod
     def load_abi(abi_path):
@@ -97,6 +107,14 @@ class APIHelper:
                 required_amount = quantity * price
                 token_to_check = quote_asset_from
                 network_key = from_network
+
+            # Validate token configuration exists on selected network
+            if not token_to_check or not str(token_to_check).startswith("0x") or len(str(token_to_check)) != 42:
+                results["valid"] = False
+                results["errors"].append(
+                    f"Token {order_data['baseAsset'] if side.lower()=='ask' else order_data['quoteAsset']} not configured on {network_key}"
+                )
+                return results
 
             # Create a temporary client for the correct chain
             net_cfg = SUPPORTED_NETWORKS.get(network_key) or {}
@@ -292,6 +310,7 @@ class APIHelper:
                 # Create clients for both chains (using matching engine key)
                 client_source = SettlementClient(source_rpc, source_contract, PRIVATE_KEY)
                 client_dest = SettlementClient(dest_rpc, dest_contract, PRIVATE_KEY)
+                print(f"client_source: {source_contract} client_dest: {dest_contract} client_source_rpc: {source_rpc} client_dest_rpc: {dest_rpc}")
                 logger.info(f"[{req_id}] Trade[{idx}] clients ready | source_chain_id={source_chain_id} dest_chain_id={dest_chain_id}")
 
                 # Check owner vs signer (must be owner for onlyOwner functions)
@@ -340,6 +359,65 @@ class APIHelper:
                     TOKEN_ADDRESSES,
                 )
 
+                # After line 355 (after determining ask_addr, bid_addr, etc.)
+                # Add counterparty escrow validation before settlement
+
+                # Validate ASK party has base tokens on source chain
+                try:
+                    ask_base_check = client_source.check_escrow_balance(
+                        ask_addr, 
+                        base_token_src, 
+                        token_decimals=18
+                    )
+                    ask_base_avail = ask_base_check.get("available", 0)
+                    ask_base_needed = float(trade["quantity"])
+                    
+                    if ask_base_avail < ask_base_needed:
+                        logger.error(
+                            f"[{req_id}] Trade[{idx}] ASK party insufficient escrow | "
+                            f"addr={ask_addr} needs {ask_base_needed} base but has {ask_base_avail} on {ask_from_network}"
+                        )
+                        settlement_results.append({
+                            "trade": trade,
+                            "settlement_result": {
+                                "success": False,
+                                "error": "insufficient_ask_base_escrow",
+                                "details": {"required": ask_base_needed, "available": ask_base_avail}
+                            }
+                        })
+                        logger.info(f"[{req_id}] Trade[{idx}] done | ok_source=False ok_dest=False elapsed={time.time()-t0:.2f}s")
+                        continue
+                except Exception as e:
+                    logger.warning(f"[{req_id}] ASK escrow check failed: {e}")
+
+                # Validate BID party has quote tokens on destination chain
+                try:
+                    bid_quote_check = client_dest.check_escrow_balance(
+                        bid_addr, 
+                        quote_token_dest, 
+                        token_decimals=18
+                    )
+                    bid_quote_avail = bid_quote_check.get("available", 0)
+                    bid_quote_needed = float(trade["quantity"]) * float(trade["price"])
+                    
+                    if bid_quote_avail < bid_quote_needed:
+                        logger.error(
+                            f"[{req_id}] Trade[{idx}] BID party insufficient escrow | "
+                            f"addr={bid_addr} needs {bid_quote_needed} quote but has {bid_quote_avail} on {bid_from_network}"
+                        )
+                        settlement_results.append({
+                            "trade": trade,
+                            "settlement_result": {
+                                "success": False,
+                                "error": "insufficient_bid_quote_escrow",
+                                "details": {"required": bid_quote_needed, "available": bid_quote_avail}
+                            }
+                        })
+                        logger.info(f"[{req_id}] Trade[{idx}] done | ok_source=False ok_dest=False elapsed={time.time()-t0:.2f}s")
+                        continue
+                except Exception as e:
+                    logger.warning(f"[{req_id}] BID escrow check failed: {e}")
+
                 # Get nonces with basic retry/backoff to handle rate limits
                 async def _retry_get_nonce(client, user, token, attempts=3):
                     last = 0
@@ -352,9 +430,10 @@ class APIHelper:
                             await asyncio.sleep(0.5 * (a + 1))
                     return last
 
+                # Nonces: source (ask) uses base token on source; destination (bid) uses quote token on destination
                 nonce1 = await _retry_get_nonce(client_source, ask_addr, base_token_src)
-                nonce2 = await _retry_get_nonce(client_dest, bid_addr, base_token_dest)
-                logger.info(f"[{req_id}] Trade[{idx}] nonces | n1={nonce1} n2={nonce2}")
+                nonce2 = await _retry_get_nonce(client_dest, bid_addr, quote_token_dest)
+                logger.info(f"[{req_id}] Trade[{idx}] nonces | source_base_nonce={nonce1} dest_quote_nonce={nonce2}")
 
                 # Trade parameters
                 order_id = str(order_dict["orderId"])
@@ -429,6 +508,32 @@ class APIHelper:
                     logger.info(
                         f"[{req_id}] Trade[{idx}] settle source chain | party1={ask_addr} side=ask party2={bid_addr} side=bid"
                     )
+                    print(f"base_token_src: {base_token_src} quote_token_src: {quote_token_src} price: {price} quantity: {quantity} timestamp: {timestamp} nonce1: {nonce1} nonce2: {nonce2}")
+                    # Debug: log full parameter set for source settle
+                    try:
+                        params_source = {
+                            "order_id": order_id,
+                            "ask_addr": ask_addr,
+                            "bid_addr": bid_addr,
+                            "ask_recv": ask_recv,
+                            "bid_recv": bid_recv,
+                            "base_token": base_token_src,
+                            "quote_token": quote_token_src,
+                            "price": price,
+                            "quantity": quantity,
+                            "party1_side": "ask",
+                            "party2_side": "bid",
+                            "source_chain_id": source_chain_id,
+                            "dest_chain_id": dest_chain_id,
+                            "timestamp": timestamp,
+                            "nonce1": nonce1,
+                            "nonce2": nonce2,
+                            "is_source_chain": True,
+                        }
+                        logger.info(f"[{req_id}] Source settle params: {json.dumps(params_source)}")
+                    except Exception:
+                        pass
+
                     result_source = client_source.settle_cross_chain_trade(
                         order_id, ask_addr, bid_addr,
                         ask_recv, bid_recv,
@@ -438,11 +543,38 @@ class APIHelper:
                         timestamp, nonce1, nonce2,
                         is_source_chain=True
                     )
+
+                    
                     if not result_source.get("success"):
                         logger.error(f"[{req_id}] Source-chain settlement failed | error={result_source.get('error')} diag={result_source.get('diagnostics')} chain={source_chain_id}")
 
                     # Settle on destination chain (contract auto-locks)
                     logger.info(f"[{req_id}] Trade[{idx}] settle destination chain")
+                    # Debug: log full parameter set for destination settle
+                    try:
+                        params_dest = {
+                            "order_id": order_id,
+                            "ask_addr": ask_addr,
+                            "bid_addr": bid_addr,
+                            "ask_recv": ask_recv,
+                            "bid_recv": bid_recv,
+                            "base_token": base_token_dest,
+                            "quote_token": quote_token_dest,
+                            "price": price,
+                            "quantity": quantity,
+                            "party1_side": "ask",
+                            "party2_side": "bid",
+                            "source_chain_id": source_chain_id,
+                            "dest_chain_id": dest_chain_id,
+                            "timestamp": timestamp,
+                            "nonce1": nonce1,
+                            "nonce2": nonce2,
+                            "is_source_chain": False,
+                        }
+                        logger.info(f"[{req_id}] Destination settle params: {json.dumps(params_dest)}")
+                    except Exception:
+                        pass
+
                     result_dest = client_dest.settle_cross_chain_trade(
                         order_id, ask_addr, bid_addr,
                         ask_recv, bid_recv,

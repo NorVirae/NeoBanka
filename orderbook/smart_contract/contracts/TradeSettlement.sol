@@ -197,9 +197,9 @@ contract TradeSettlement is ReentrancyGuard, Ownable {
     ) external nonReentrant onlyOwner {
         // Lock required funds for this leg if not already locked on this chain
         _ensureLockForCurrentChain(tradeData, isSourceChain);
-        // Prevent replay attacks
+        // Prevent replay attacks per chain (allow one settle per leg)
         require(
-            !settledCrossChainOrders[tradeData.orderId],
+            !settlementByChain[tradeData.orderId][block.chainid],
             "Order already settled on this chain"
         );
         
@@ -229,28 +229,11 @@ contract TradeSettlement is ReentrancyGuard, Ownable {
         );
         require(validSides, "Parties must be on opposite sides");
 
-        // Create unique trade hash
-        bytes32 tradeHash = keccak256(
-            abi.encodePacked(
-                tradeData.orderId,
-                tradeData.party1,
-                tradeData.party2,
-                tradeData.baseAsset,
-                tradeData.quoteAsset,
-                tradeData.price,
-                tradeData.quantity,
-                tradeData.sourceChainId,
-                tradeData.destinationChainId,
-                tradeData.timestamp
-            )
-        );
-
-        require(!executedTrades[tradeHash], "Trade already executed");
-        executedTrades[tradeHash] = true;
+        // Note: global replay is managed per-chain via settlementByChain; avoid blocking the second leg
 
         // Signatures removed; onlyOwner acts as the authorized matching engine
 
-        settledCrossChainOrders[tradeData.orderId] = true;
+        // Mark the current chain leg as settled (global status recorded below)
 
         uint256 currentChainId = block.chainid;
         settlementByChain[tradeData.orderId][currentChainId] = true;
@@ -268,8 +251,14 @@ contract TradeSettlement is ReentrancyGuard, Ownable {
             settlementStatuses[tradeData.orderId].destinationChainTimestamp = block.timestamp;
         }
 
-        nonces[tradeData.party1][tradeData.baseAsset] = tradeData.nonce1 + 1;
-        nonces[tradeData.party2][tradeData.baseAsset] = tradeData.nonce2 + 1;
+        // Advance nonces per leg
+        if (isSourceChain) {
+            // Source: party1 (ask) base nonce
+            nonces[tradeData.party1][tradeData.baseAsset] = tradeData.nonce1 + 1;
+        } else {
+            // Destination: party2 (bid) quote nonce
+            nonces[tradeData.party2][tradeData.quoteAsset] = tradeData.nonce2 + 1;
+        }
     }
 
     /**
