@@ -26,7 +26,7 @@ const Button = ({ children, className = '', ...props }) => (
 
 function useNetworkKey() {
   const { provider } = useWallet();
-  const [key, setKey] = useState<'hedera' | 'polygon'>('hedera');
+  const [key, setKey] = useState<'hedera' | 'ethereum'>('hedera');
   useEffect(() => {
     let mounted = true;
     (async () => {
@@ -35,7 +35,7 @@ function useNetworkKey() {
         const net = await provider.getNetwork();
         const cid = Number(net.chainId);
         const match = Object.entries(CHAIN_REGISTRY).find(([, v]) => Number(v.chainId) === cid);
-        if (mounted && match) setKey(match[0] as 'hedera' | 'polygon');
+        if (mounted && match) setKey(match[0] as 'hedera' | 'ethereum');
       } catch {}
     })();
     return () => { mounted = false; };
@@ -47,44 +47,50 @@ export default function BalancePanel() {
   const { account, provider, isConnected } = useWallet();
   const netKey = useNetworkKey();
   const [loading, setLoading] = useState(false);
-  const [walletHBAR, setWalletHBAR] = useState<string>('0');
-  const [walletUSDT, setWalletUSDT] = useState<string>('0');
-  const [escrowHBAR, setEscrowHBAR] = useState<{ total: string; available: string; locked: string }>({ total: '0', available: '0', locked: '0' });
-  const [escrowUSDT, setEscrowUSDT] = useState<{ total: string; available: string; locked: string }>({ total: '0', available: '0', locked: '0' });
+  const [walletByToken, setWalletByToken] = useState<Record<string, string>>({});
+  const [escrowByToken, setEscrowByToken] = useState<Record<string, { total: string; available: string; locked: string }>>({});
 
   const addrs = useMemo(() => {
     try {
-      const base = CHAIN_REGISTRY[netKey];
-      const hbarAddr = resolveTokenAddress(netKey, 'HBAR');
-      const usdtAddr = resolveTokenAddress(netKey, 'USDT');
       const settle = resolveSettlementAddress(netKey);
-      return { hbarAddr, usdtAddr, settle };
+      console.log(settle,'settlement ADDR', netKey);
+      const tokens = ['HBAR', 'USDT'] as const;
+      const tokenAddrs: Record<string, string> = {};
+      tokens.forEach((sym) => {
+        const addr = resolveTokenAddress(netKey, sym);
+        if (addr) tokenAddrs[sym] = addr;
+      });
+      return { tokens: tokenAddrs, settle } as { tokens: Record<string, string>; settle: string };
     } catch {
-      return { hbarAddr: '', usdtAddr: '', settle: '' };
+      return { tokens: {}, settle: '' } as { tokens: Record<string, string>; settle: string };
     }
   }, [netKey]);
 
   const load = async () => {
-    if (!isConnected || !account || !provider || !addrs.hbarAddr || !addrs.usdtAddr || !addrs.settle) return;
+    if (!isConnected || !account || !provider || !addrs.settle) return;
     setLoading(true);
     try {
-      // Prefer wallet provider for reads (avoids rate limits on public RPC)
-      const hbar = new ethers.Contract(addrs.hbarAddr, ERC20_ABI, provider);
-      const usdt = new ethers.Contract(addrs.usdtAddr, ERC20_ABI, provider);
-      const decHBAR = Number(await hbar.decimals().catch(() => 18));
-      const decUSDT = Number(await usdt.decimals().catch(() => 6));
-      const [balHBAR, balUSDT] = await Promise.all([
-        hbar.balanceOf(account).catch(() => 0n),
-        usdt.balanceOf(account).catch(() => 0n),
-      ]);
-      setWalletHBAR(ethers.formatUnits(balHBAR, decHBAR));
-      setWalletUSDT(ethers.formatUnits(balUSDT, decUSDT));
-
       const settlement = new ethers.Contract(addrs.settle, SETTLEMENT_ABI, provider);
-      const [t1, a1, l1] = await settlement.checkEscrowBalance(account, addrs.hbarAddr).catch(() => [0n, 0n, 0n]);
-      const [t2, a2, l2] = await settlement.checkEscrowBalance(account, addrs.usdtAddr).catch(() => [0n, 0n, 0n]);
-      setEscrowHBAR({ total: ethers.formatUnits(t1, decHBAR), available: ethers.formatUnits(a1, decHBAR), locked: ethers.formatUnits(l1, decHBAR) });
-      setEscrowUSDT({ total: ethers.formatUnits(t2, decUSDT), available: ethers.formatUnits(a2, decUSDT), locked: ethers.formatUnits(l2, decUSDT) });
+      const nextWallet: Record<string, string> = {};
+      const nextEscrow: Record<string, { total: string; available: string; locked: string }> = {};
+
+      const entries = Object.entries(addrs.tokens);
+      for (const [symbol, tokenAddr] of entries) {
+        const token = new ethers.Contract(tokenAddr, ERC20_ABI, provider);
+        const decimals = Number(await token.decimals().catch(() => (symbol === 'USDT' ? 6 : 18)));
+        const bal = await token.balanceOf(account).catch(() => 0n);
+        nextWallet[symbol] = ethers.formatUnits(bal, decimals);
+
+        const [t, a, l] = await settlement.checkEscrowBalance(account, tokenAddr).catch(() => [0n, 0n, 0n]);
+        nextEscrow[symbol] = {
+          total: ethers.formatUnits(t, decimals),
+          available: ethers.formatUnits(a, decimals),
+          locked: ethers.formatUnits(l, decimals)
+        };
+      }
+
+      setWalletByToken(nextWallet);
+      setEscrowByToken(nextEscrow);
     } finally {
       setLoading(false);
     }
@@ -96,7 +102,7 @@ export default function BalancePanel() {
     const id = setInterval(load, 20000);
     return () => clearInterval(id);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [account, provider, addrs.hbarAddr, addrs.usdtAddr, addrs.settle]);
+  }, [account, provider, addrs.tokens.HBAR, addrs.tokens.USDT, addrs.settle]);
 
   return (
     <Card className="h-full">
@@ -112,17 +118,16 @@ export default function BalancePanel() {
               <div className="font-medium">Network</div>
               <div className="text-muted-foreground capitalize">{netKey}</div>
             </div>
-            <div className="grid grid-cols-2 gap-3">
-              <div className="border border-border rounded p-3">
-                <div className="text-xs text-muted-foreground mb-1">HBAR (ERC20)</div>
-                <div className="text-foreground font-semibold">Wallet: {Number(walletHBAR).toFixed(4)}</div>
-                <div className="text-xs mt-1">Escrow: {Number(escrowHBAR.total).toFixed(4)} • Avail {Number(escrowHBAR.available).toFixed(4)} • Locked {Number(escrowHBAR.locked).toFixed(4)}</div>
-              </div>
-              <div className="border border-border rounded p-3">
-                <div className="text-xs text-muted-foreground mb-1">USDT</div>
-                <div className="text-foreground font-semibold">Wallet: {Number(walletUSDT).toFixed(4)}</div>
-                <div className="text-xs mt-1">Escrow: {Number(escrowUSDT.total).toFixed(4)} • Avail {Number(escrowUSDT.available).toFixed(4)} • Locked {Number(escrowUSDT.locked).toFixed(4)}</div>
-              </div>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              {Object.entries(addrs.tokens).map(([symbol]) => (
+                <div key={symbol} className="border border-border rounded p-3">
+                  <div className="text-xs text-muted-foreground mb-1">{symbol}{symbol === 'HBAR' ? ' (ERC20)' : ''}</div>
+                  <div className="text-foreground font-semibold">Wallet: {Number(walletByToken[symbol] || '0').toFixed(4)}</div>
+                  <div className="text-xs mt-1">
+                    Escrow: {Number((escrowByToken[symbol]?.total) || '0').toFixed(4)} • Avail {Number((escrowByToken[symbol]?.available) || '0').toFixed(4)} • Locked {Number((escrowByToken[symbol]?.locked) || '0').toFixed(4)}
+                  </div>
+                </div>
+              ))}
             </div>
             <div className="flex justify-end">
               <Button onClick={load} disabled={loading}>{loading ? 'Refreshing…' : 'Refresh'}</Button>

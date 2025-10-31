@@ -80,19 +80,23 @@ class APIHelper:
             # Resolve networks
             from_network = (order_data.get("from_network") or order_data.get("fromNetwork") or "").lower()
             to_network = (order_data.get("to_network") or order_data.get("toNetwork") or "").lower()
+   
 
             # Get token addresses for each network
             base_asset_from = APIHelper.get_token_address(order_data["baseAsset"], from_network, SUPPORTED_NETWORKS, TOKEN_ADDRESSES)
-            quote_asset_to = APIHelper.get_token_address(order_data["quoteAsset"], to_network, SUPPORTED_NETWORKS, TOKEN_ADDRESSES)
-
+            # For cross-chain bids we must validate quote token on the FROM network (escrow always on from_network)
+            quote_asset_from = APIHelper.get_token_address(order_data["quoteAsset"], from_network, SUPPORTED_NETWORKS, TOKEN_ADDRESSES)
+            print(f"base_asset_from: {base_asset_from} quote_asset_from: {quote_asset_from}")
             if side.lower() == "ask":
+                # Seller must have base asset escrow on FROM network
                 required_amount = quantity
                 token_to_check = base_asset_from
                 network_key = from_network
             else:
+                # Buyer must have quote asset escrow on FROM network
                 required_amount = quantity * price
-                token_to_check = quote_asset_to
-                network_key = to_network
+                token_to_check = quote_asset_from
+                network_key = from_network
 
             # Create a temporary client for the correct chain
             net_cfg = SUPPORTED_NETWORKS.get(network_key) or {}

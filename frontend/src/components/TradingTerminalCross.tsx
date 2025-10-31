@@ -8,7 +8,7 @@ export function TradingTerminalCross({ onSymbolChange }: { onSymbolChange?: (s: 
       onSymbolChange={onSymbolChange}
       variant="cross"
       defaultFromNetwork="hedera"
-      defaultToNetwork="polygon"
+      defaultToNetwork="ethereum"
       useTradeImpl={useTradeCross as any}
     />
   );

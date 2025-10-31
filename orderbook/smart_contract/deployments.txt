@@ -1,15 +1,16 @@
+==================================================
 {
   "network": "hedera testnet",
   "contract": "TradeSettlement",
-  "address": "0xEBDe923E00809f9203256beBD59249df1c49Ec48",
-  "deployer": "0x877664Ae1f1ca217977562A04592eCbCADb2Ca58",
-  "deploymentHash": "0x750a789438dd4345f4b371d6b123fd59614d2df97814443ce3b2ff47a70516e4",
+  "address": "0x68A47b99505303430d85dCFeA0BC5e2BFdBfDA70",
+  "deployer": "0x01B144754760F89Dc0179a22BaFa426427ad9592",
+  "deploymentHash": "0x5f2df7eb1dd8346f6a28049189d22c26c291dccfe8a5e8623860e319daab6af3",
   "gasUsed": "2709725",
-  "timestamp": "2025-10-29T13:15:30.818Z"
+  "timestamp": "2025-10-31T13:36:46.383Z"
 }
 ==================================================
-HBAR deployed to: 0xA219e375D1F84A50273c93FaaF5EACD285bD9990
-USDT deployed to: 0x62bcF51859E23cc47ddc6C3144B045619476Be92
+HBAR deployed to: 0x04a6532799118BFF060b66fFe1732778765a43Dd
+USDT deployed to: 0xb458260166d1456A5ffB46eBbC4270738A515286
 
 
 ==================================================
@@ -24,6 +25,21 @@ USDT deployed to: 0x62bcF51859E23cc47ddc6C3144B045619476Be92
 }
 HBAR deployed to: 0x41086d277f8A183A351310eC89d1AA9Dc1e67B7B
 USDT deployed to: 0x750702AA1dE631277576602b780A38790c36E19e
+
+
+
+==================================================
+{
+  "network": "sepolia",
+  "contract": "TradeSettlement",
+  "address": "0x53fC9c7954c7aB0C2e8061643a24e673a6dBe8b7",
+  "deployer": "0x01B144754760F89Dc0179a22BaFa426427ad9592",
+  "deploymentHash": "0xaad95545c9c95308fb8a388352347923f2a7578b6fa6d67066e87b25c9e3f946",
+  "gasUsed": "2710489",
+  "timestamp": "2025-10-31T14:13:37.910Z"
+}
+HBAR deployed to: 0xb458260166d1456A5ffB46eBbC4270738A515286
+USDT deployed to: 0x68A47b99505303430d85dCFeA0BC5e2BFdBfDA70
 
 ==================================================
 {

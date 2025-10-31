@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
+import { ethers } from 'ethers';
 import {
   Settings,
   Power,
@@ -26,7 +27,7 @@ import { useWallet } from '../hooks/useWallet';
 import { orderbookApi } from '../lib/api';
 import { useTrade } from '../hooks/useTrade';
 import { useToast } from './ui/use-toast';
-import { resolveSettlementAddress, CHAIN_REGISTRY, HEDERA_TESTNET } from '../lib/contracts';
+import { resolveSettlementAddress, resolveTokenAddress, CHAIN_REGISTRY, HEDERA_TESTNET } from '../lib/contracts';
 import { priceService, type PriceData, PriceService } from '../lib/priceService';
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, ResponsiveContainer, Tooltip } from 'recharts';
 import LabelTerminal from './ui/label-terminal';
@@ -233,47 +234,58 @@ const TradingPanel = ({ account, onOrderSubmit, loading, fromNetwork, toNetwork,
   const [isSwitching, setIsSwitching] = useState(false);
 
   // Quick toggle: switch MetaMask to the selected from-network (where approvals/deposits happen)
-  const switchOrAddNetwork = async (targetKey: 'hedera' | 'polygon' | 'ethereum') => {
-    const eth: any = (window as any).ethereum;
-    if (!eth || !eth.request) return;
-    try {
-      setIsSwitching(true);
-      const target = CHAIN_REGISTRY[targetKey];
-      const hexChainId = '0x' + target.chainId.toString(16);
-      await eth.request({ method: 'wallet_switchEthereumChain', params: [{ chainId: hexChainId }] });
-    } catch (switchErr: any) {
-      // If not added, add then switch
-      const needsAdd = switchErr?.code === 4902 || /Unrecognized chain ID/i.test(String(switchErr?.message || ''));
-      if (!needsAdd) throw switchErr;
-      const params = targetKey === 'hedera'
-        ? {
-            chainId: '0x' + CHAIN_REGISTRY.hedera.chainId.toString(16),
-            chainName: HEDERA_TESTNET.chainName,
-            nativeCurrency: HEDERA_TESTNET.nativeCurrency as any,
-            rpcUrls: (HEDERA_TESTNET.rpcUrls as any) || [],
-            blockExplorerUrls: HEDERA_TESTNET.blockExplorerUrls as any,
+  const switchOrAddNetwork = (() => {
+    let inFlight = false;
+    return async (targetKey: 'hedera' | 'ethereum') => {
+      if (inFlight) return; // prevent concurrent switches
+      const eth: any = (window as any).ethereum;
+      if (!eth || !eth.request) return;
+      try {
+        inFlight = true;
+        setIsSwitching(true);
+        const target = CHAIN_REGISTRY[targetKey];
+        const hexChainId = '0x' + target.chainId.toString(16);
+        try {
+          await eth.request({ method: 'wallet_switchEthereumChain', params: [{ chainId: hexChainId }] });
+        } catch (switchErr: any) {
+          const needsAdd = switchErr?.code === 4902 || /Unrecognized chain ID/i.test(String(switchErr?.message || ''));
+          if (!needsAdd) throw switchErr;
+          const params = targetKey === 'hedera'
+            ? {
+                chainId: '0x' + CHAIN_REGISTRY.hedera.chainId.toString(16),
+                chainName: HEDERA_TESTNET.chainName,
+                nativeCurrency: HEDERA_TESTNET.nativeCurrency as any,
+                rpcUrls: (HEDERA_TESTNET.rpcUrls as any) || [],
+                blockExplorerUrls: HEDERA_TESTNET.blockExplorerUrls as any,
+              }
+            : {
+                chainId: '0x' + CHAIN_REGISTRY.ethereum.chainId.toString(16),
+                chainName: 'Ethereum Sepolia',
+                nativeCurrency: { name: 'ETH', symbol: 'ETH', decimals: 18 },
+                rpcUrls: [CHAIN_REGISTRY.ethereum.rpc].filter(Boolean),
+                blockExplorerUrls: ['https://sepolia.etherscan.io'] as any,
+              };
+          await eth.request({ method: 'wallet_addEthereumChain', params: [params] });
+          await eth.request({ method: 'wallet_switchEthereumChain', params: [{ chainId: params.chainId }] });
+        }
+        // Verify the network actually switched (wallet UIs can lag)
+        const anyWindow: any = window as any;
+        const provider = anyWindow?.ethereum ? new ethers.BrowserProvider(anyWindow.ethereum) : null;
+        if (provider) {
+          for (let i = 0; i < 5; i++) {
+            try {
+              const net = await provider.getNetwork();
+              if (Number(net.chainId) === CHAIN_REGISTRY[targetKey].chainId) break;
+            } catch {}
+            await new Promise(r => setTimeout(r, 500));
           }
-        : targetKey === 'polygon'
-        ? {
-            chainId: '0x' + CHAIN_REGISTRY.polygon.chainId.toString(16),
-            chainName: 'Polygon Mainnet',
-            nativeCurrency: { name: 'MATIC', symbol: 'MATIC', decimals: 18 },
-            rpcUrls: [CHAIN_REGISTRY.polygon.rpc].filter(Boolean),
-            blockExplorerUrls: ['https://polygonscan.com/'] as any,
-          }
-        : {
-            chainId: '0x' + CHAIN_REGISTRY.ethereum.chainId.toString(16),
-            chainName: 'Ethereum Sepolia',
-            nativeCurrency: { name: 'ETH', symbol: 'ETH', decimals: 18 },
-            rpcUrls: [CHAIN_REGISTRY.ethereum.rpc].filter(Boolean),
-            blockExplorerUrls: ['https://sepolia.etherscan.io'] as any,
-          };
-      await eth.request({ method: 'wallet_addEthereumChain', params: [params] });
-      await eth.request({ method: 'wallet_switchEthereumChain', params: [{ chainId: params.chainId }] });
-    } finally {
-      setIsSwitching(false);
-    }
-  };
+        }
+      } finally {
+        setIsSwitching(false);
+        inFlight = false;
+      }
+    };
+  })();
 
   const isQuickActive = (from: string, to: string) => (fromNetwork === from && toNetwork === to);
 
@@ -318,6 +330,28 @@ const TradingPanel = ({ account, onOrderSubmit, loading, fromNetwork, toNetwork,
     if (!priceToUse) return;
 
     try {
+      // Debug: log chain + settlement + token addresses being submitted
+      try {
+        const escrowNetKey = String(fromNetwork || '').toLowerCase();
+        const settlementAddr = resolveSettlementAddress(escrowNetKey as 'hedera' | 'ethereum');
+        const baseAddr = resolveTokenAddress(escrowNetKey as 'hedera' | 'ethereum', baseAsset);
+        const quoteAddr = resolveTokenAddress(escrowNetKey as 'hedera' | 'ethereum', quoteAsset);
+        console.log('Submit (ui) — outbound payload preview', {
+          escrowNetKey,
+          chainId: CHAIN_REGISTRY[escrowNetKey as 'hedera' | 'ethereum']?.chainId,
+          settlementAddr,
+          baseAsset,
+          baseAddr,
+          quoteAsset,
+          quoteAddr,
+          fromNetwork,
+          toNetwork,
+          side,
+          price: priceToUse,
+          quantity,
+        });
+      } catch {}
+
       await onOrderSubmit({
         account,
         baseAsset,
@@ -337,6 +371,16 @@ const TradingPanel = ({ account, onOrderSubmit, loading, fromNetwork, toNetwork,
       // Error handling should be done in the parent component
     }
   };
+
+  // Auto-switch to the chosen from-network when user changes it via select
+  useEffect(() => {
+    const key = (fromNetwork || '').toLowerCase();
+    if (key === 'hedera' || key === 'ethereum') {
+      // fire-and-forget; guarded in switch function
+      switchOrAddNetwork(key as 'hedera' | 'ethereum').catch(() => {});
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [fromNetwork]);
 
   return (
     <Card variant="neon" className="h-full">
@@ -378,39 +422,21 @@ const TradingPanel = ({ account, onOrderSubmit, loading, fromNetwork, toNetwork,
             <div className="grid grid-cols-2 gap-2">
               <Button
                 type="button"
-                variant={isQuickActive('hedera','polygon') ? 'default' : 'outline'}
+                variant={isQuickActive('hedera','ethereum') ? 'default' : 'outline'}
                 size="sm"
                 disabled={isSwitching}
-                onClick={async () => { setFromNetwork('hedera'); setToNetwork('polygon'); try { await switchOrAddNetwork('hedera'); } catch {} }}
+                onClick={async () => { setFromNetwork('hedera'); setToNetwork('ethereum'); try { await switchOrAddNetwork('hedera');  } catch(err) { console.error('Error switching to Hedera:', err); } }}
               >
-                Hedera → Polygon
+                Hedera → Sepolia
               </Button>
               <Button
                 type="button"
-                variant={isQuickActive('polygon','hedera') ? 'default' : 'outline'}
+                variant={isQuickActive('ethereum','hedera') ? 'default' : 'outline'}
                 size="sm"
                 disabled={isSwitching}
-                onClick={async () => { setFromNetwork('polygon'); setToNetwork('hedera'); try { await switchOrAddNetwork('polygon'); } catch {} }}
+                onClick={async () => { setFromNetwork('ethereum'); setToNetwork('hedera'); try { await switchOrAddNetwork('ethereum'); } catch {} }}
               >
-                Polygon → Hedera
-              </Button>
-              <Button
-                type="button"
-                variant={isQuickActive('ethereum','polygon') ? 'default' : 'outline'}
-                size="sm"
-                disabled={isSwitching}
-                onClick={async () => { setFromNetwork('ethereum'); setToNetwork('polygon'); try { await switchOrAddNetwork('ethereum'); } catch {} }}
-              >
-                Ethereum → Polygon
-              </Button>
-              <Button
-                type="button"
-                variant={isQuickActive('polygon','ethereum') ? 'default' : 'outline'}
-                size="sm"
-                disabled={isSwitching}
-                onClick={async () => { setFromNetwork('polygon'); setToNetwork('ethereum'); try { await switchOrAddNetwork('polygon'); } catch {} }}
-              >
-                Polygon → Ethereum
+                Sepolia → Hedera
               </Button>
             </div>
           )}
@@ -420,13 +446,13 @@ const TradingPanel = ({ account, onOrderSubmit, loading, fromNetwork, toNetwork,
               network={fromNetwork}
               setNetwork={setFromNetwork}
               label={"From network"}
-              assetList={variant === 'cross' ? ["hedera", "ethereum", "polygon"] : ["hedera"]}
+              assetList={variant === 'cross' ? ["hedera", "ethereum"] : ["hedera"]}
             />
             <NetworkList
               network={toNetwork}
               setNetwork={setToNetwork}
               label={"To Network"}
-              assetList={variant === 'cross' ? ["hedera", "ethereum", "polygon"] : ["hedera"]}
+              assetList={variant === 'cross' ? ["hedera", "ethereum"] : ["hedera"]}
             />
 
           </div>
@@ -939,8 +965,8 @@ export function TradingTerminal({ onSymbolChange, variant = 'same', symbolSuffix
       try {
         const hed = resolveSettlementAddress('hedera');
         if (hed) addLog(`Hedera settlement ${formatAddress(hed)}`, 'success');
-        const pol = resolveSettlementAddress('polygon');
-        if (pol) addLog(`Polygon settlement ${formatAddress(pol)}`, 'success');
+        const eth = resolveSettlementAddress('ethereum');
+        if (eth) addLog(`Sepolia settlement ${formatAddress(eth)}`, 'success');
       } catch {}
     }
   }, [isConnected, account]);

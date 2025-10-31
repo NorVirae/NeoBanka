@@ -30,6 +30,21 @@ const config: HardhatUserConfig = {
       url: process.env.POLYGON_RPC_URL || "https://polygon-rpc.com",
       accounts: process.env.HEDERA_PRIVATE_KEY ? [process.env.HEDERA_PRIVATE_KEY] : [],
       chainId: 137
+    },
+
+    sepolia: {
+      // Ethereum Sepolia Testnet
+      url: process.env.SEPOLIA_RPC_URL || "https://ethereum-sepolia-rpc.publicnode.com",
+      accounts: process.env.HEDERA_PRIVATE_KEY ? [process.env.HEDERA_PRIVATE_KEY] : [],
+      chainId: 11155111,
+      gasPrice: "auto" // Let it auto-calculate gas price
+    }
+  },
+
+  // Optional: Add Etherscan verification for Sepolia
+  etherscan: {
+    apiKey: {
+      sepolia: process.env.ETHERSCAN_API_KEY || ""
     }
   }
 };

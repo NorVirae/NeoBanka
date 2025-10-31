@@ -16,8 +16,8 @@ export interface OrderParamsSame {
   price: string;
   quantity: string;
   side: 'bid' | 'ask';
-  fromNetwork: 'hedera' | 'polygon';
-  toNetwork: 'hedera' | 'polygon';
+  fromNetwork: 'hedera' | 'ethereum';
+  toNetwork: 'hedera' | 'ethereum';
   receiveWallet: string;
   type?: 'limit' | 'market';
 }
@@ -39,7 +39,7 @@ export function useTradeSame() {
     if (Number(net.chainId) !== targetChainId) throw new Error(`WRONG_NETWORK:${targetChainId}`);
   };
 
-  const switchOrAddNetwork = async (targetKey: 'hedera' | 'polygon') => {
+  const switchOrAddNetwork = async (targetKey: 'hedera' | 'ethereum') => {
     if (!provider) throw new Error('Wallet not connected');
     const target = CHAIN_REGISTRY[targetKey];
     const hexChainId = '0x' + target.chainId.toString(16);
@@ -50,7 +50,7 @@ export function useTradeSame() {
       if (e?.code !== 4902) throw e;
       const params = targetKey === 'hedera'
         ? { chainId: hexChainId, chainName: 'Hedera Testnet', nativeCurrency: { name: 'HBAR', symbol: 'HBAR', decimals: 18 }, rpcUrls: HEDERA_TESTNET.rpcUrls as any, blockExplorerUrls: HEDERA_TESTNET.blockExplorerUrls as any }
-        : { chainId: hexChainId, chainName: 'Polygon Amoy Testnet', nativeCurrency: { name: 'MATIC', symbol: 'MATIC', decimals: 18 }, rpcUrls: [CHAIN_REGISTRY.polygon.rpc], blockExplorerUrls: ['https://www.oklink.com/amoy'] as any };
+        : { chainId: hexChainId, chainName: 'Ethereum Sepolia', nativeCurrency: { name: 'ETH', symbol: 'ETH', decimals: 18 }, rpcUrls: [CHAIN_REGISTRY.ethereum.rpc], blockExplorerUrls: ['https://sepolia.etherscan.io'] as any };
       await anyProv.send('wallet_addEthereumChain', [params]);
       await anyProv.send('wallet_switchEthereumChain', [{ chainId: hexChainId }]);
     }
