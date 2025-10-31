@@ -286,7 +286,7 @@ class APIService:
                         def runner():
                             require_clients = os.getenv("REQUIRE_CLIENT_SIGNATURES", "false").lower() in ("1", "true", "yes")
                             return asyncio.run(
-                                APIHelper.settle_trades_if_any(
+                                APIHelper.settle_trades_if_any_same(
                                     order_dict,
                                     SUPPORTED_NETWORKS,
                                     TRADE_SETTLEMENT_CONTRACT_ADDRESS,
@@ -435,8 +435,8 @@ class APIService:
                 return JSONResponse(content={"message": "Cross-chain orders require different from/to networks", "status_code": 0}, status_code=400)
             symbol = "%s_%s" % (payload_json["baseAsset"], payload_json["quoteAsset"])
 
-            # Validate order prerequisites
-            validation_result = await APIHelper.validate_order_prerequisites(
+            # Validate order prerequisites (cross-chain aware)
+            validation_result = await APIHelper.validate_order_prerequisites_cross(
                 order_data=payload_json,
                 SUPPORTED_NETWORKS=SUPPORTED_NETWORKS,
                 TOKEN_ADDRESSES=TOKEN_ADDRESSES,
@@ -566,7 +566,7 @@ class APIService:
             settlement_info = {"settled": False}
             if converted_trades:
                 try:
-                    settlement_info = await APIHelper.settle_trades_if_any(
+                    settlement_info = await APIHelper.settle_trades_if_any_cross(
                         order_dict,
                         SUPPORTED_NETWORKS,
                         TRADE_SETTLEMENT_CONTRACT_ADDRESS,
@@ -841,8 +841,20 @@ class APIService:
                 trades = []
             order_dict["trades"] = trades
 
-            # Trigger settlement
-            settlement_info = await APIHelper.settle_trades_if_any(
+            # Trigger settlement (route dynamically based on trade networks)
+            # Determine using first trade; fallback to cross-chain
+            use_cross = True
+            try:
+                t0 = (order_dict.get("trades") or [])[0]
+                p1_from = (t0.get("party1") or [None]*8)[5]
+                p2_from = (t0.get("party2") or [None]*8)[5]
+                if p1_from and p2_from:
+                    c1 = SUPPORTED_NETWORKS.get(p1_from, {}).get("chain_id")
+                    c2 = SUPPORTED_NETWORKS.get(p2_from, {}).get("chain_id")
+                    use_cross = (c1 != c2)
+            except Exception:
+                use_cross = True
+            settlement_info = await (APIHelper.settle_trades_if_any_cross if use_cross else APIHelper.settle_trades_if_any_same)(
                 order_dict,
                 SUPPORTED_NETWORKS,
                 TRADE_SETTLEMENT_CONTRACT_ADDRESS,

@@ -226,17 +226,21 @@ class APIHelper:
                 # Extract party information
                 party1_addr = trade["party1"][0]
                 party1_side = trade["party1"][1]
-                party1_priv_key = trade["party1"][4]
+                _party1_priv_key = trade["party1"][4]
                 party1_from_network = trade["party1"][5] if len(trade["party1"]) > 5 else None
-                party1_to_network = trade["party1"][6] if len(trade["party1"]) > 6 else None
+                _party1_to_network = trade["party1"][6] if len(trade["party1"]) > 6 else None
                 party1_receive_wallet = trade["party1"][7] if len(trade["party1"]) > 7 else party1_addr
 
                 party2_addr = trade["party2"][0]
                 party2_side = trade["party2"][1]
-                party2_priv_key = trade["party2"][4]
+                _party2_priv_key = trade["party2"][4]
                 party2_from_network = trade["party2"][5] if len(trade["party2"]) > 5 else None
-                party2_to_network = trade["party2"][6] if len(trade["party2"]) > 6 else None
+                _party2_to_network = trade["party2"][6] if len(trade["party2"]) > 6 else None
                 party2_receive_wallet = trade["party2"][7] if len(trade["party2"]) > 7 else party2_addr
+
+                # Restore names for downstream normalization
+                party1_to_network = _party1_to_network
+                party2_to_network = _party2_to_network
 
                 # Normalize roles so that party1 is always ASK (seller of base) on the SOURCE chain,
                 # and party2 is always BID (buyer with quote) on the DESTINATION chain.
@@ -472,6 +476,89 @@ class APIHelper:
         except Exception as e:
             logger.error(f"[{req_id}] Error during trade settlement: {e}")
             return {"settled": False, "error": str(e)}
+
+    @staticmethod
+    async def settle_trades_if_any_same(
+        order_dict: dict,
+        SUPPORTED_NETWORKS: dict,
+        TRADE_SETTLEMENT_CONTRACT_ADDRESS: str,
+        CONTRACT_ABI: list,
+        PRIVATE_KEY: str,
+        TOKEN_ADDRESSES: dict,
+        settlement_client: SettlementClient,
+        REQUIRE_CLIENT_SIGNATURES: bool = False,
+    ) -> dict:
+        """Wrapper to process only same-chain trades using settle_trades_if_any logic."""
+        # Filter or validate that trades are same-chain
+        try:
+            trades = order_dict.get("trades") or []
+            if not trades:
+                return {"settled": False, "reason": "No trades to settle"}
+            t0 = trades[0]
+            p1_from = (t0.get("party1") or [None]*8)[5]
+            p2_from = (t0.get("party2") or [None]*8)[5]
+            if not p1_from or not p2_from:
+                return {"settled": False, "error": "missing_networks"}
+            if SUPPORTED_NETWORKS.get(p1_from, {}).get("chain_id") != SUPPORTED_NETWORKS.get(p2_from, {}).get("chain_id"):
+                return {"settled": False, "error": "not_same_chain"}
+            return await APIHelper.settle_trades_if_any(
+                order_dict,
+                SUPPORTED_NETWORKS,
+                TRADE_SETTLEMENT_CONTRACT_ADDRESS,
+                CONTRACT_ABI,
+                PRIVATE_KEY,
+                TOKEN_ADDRESSES,
+                settlement_client,
+                REQUIRE_CLIENT_SIGNATURES=REQUIRE_CLIENT_SIGNATURES,
+            )
+        except Exception as e:
+            return {"settled": False, "error": str(e)}
+
+    @staticmethod
+    async def settle_trades_if_any_cross(
+        order_dict: dict,
+        SUPPORTED_NETWORKS: dict,
+        TRADE_SETTLEMENT_CONTRACT_ADDRESS: str,
+        CONTRACT_ABI: list,
+        PRIVATE_KEY: str,
+        TOKEN_ADDRESSES: dict,
+        settlement_client: SettlementClient,
+        REQUIRE_CLIENT_SIGNATURES: bool = False,
+    ) -> dict:
+        """Wrapper to process only cross-chain trades using settle_trades_if_any logic."""
+        try:
+            trades = order_dict.get("trades") or []
+            if not trades:
+                return {"settled": False, "reason": "No trades to settle"}
+            t0 = trades[0]
+            p1_from = (t0.get("party1") or [None]*8)[5]
+            p2_from = (t0.get("party2") or [None]*8)[5]
+            if not p1_from or not p2_from:
+                return {"settled": False, "error": "missing_networks"}
+            if SUPPORTED_NETWORKS.get(p1_from, {}).get("chain_id") == SUPPORTED_NETWORKS.get(p2_from, {}).get("chain_id"):
+                return {"settled": False, "error": "not_cross_chain"}
+            return await APIHelper.settle_trades_if_any(
+                order_dict,
+                SUPPORTED_NETWORKS,
+                TRADE_SETTLEMENT_CONTRACT_ADDRESS,
+                CONTRACT_ABI,
+                PRIVATE_KEY,
+                TOKEN_ADDRESSES,
+                settlement_client,
+                REQUIRE_CLIENT_SIGNATURES=REQUIRE_CLIENT_SIGNATURES,
+            )
+        except Exception as e:
+            return {"settled": False, "error": str(e)}
+
+    @staticmethod
+    async def validate_order_prerequisites_cross(
+        order_data: dict,
+        SUPPORTED_NETWORKS: dict,
+        TOKEN_ADDRESSES: dict,
+        PRIVATE_KEY: str,
+    ) -> dict:
+        """Cross-chain oriented prerequisite check (ask: base on from; bid: quote on to)."""
+        return await APIHelper.validate_order_prerequisites(order_data, SUPPORTED_NETWORKS, TOKEN_ADDRESSES, PRIVATE_KEY)
 
     @staticmethod
     async def handlePayloadJson(request: Request):
