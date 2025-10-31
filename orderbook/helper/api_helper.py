@@ -218,7 +218,6 @@ class APIHelper:
         settlement_results = []
 
         try:
-            # Import SettlementClient
             
             
             for idx, trade in enumerate(order_dict["trades"]):

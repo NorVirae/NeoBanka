@@ -6,6 +6,7 @@ including escrow management, token approvals, signature creation, and trade sett
 """
 
 import json
+import os
 from web3 import Web3
 from eth_account import Account
 from eth_account.messages import encode_defunct
@@ -13,11 +14,14 @@ from typing import Dict, Optional
 
 # from src import settlement ERC20_ABI, TRADE_SETTLEMENT_ABI
 
+_THIS_DIR = os.path.dirname(__file__)
+_ORDERBOOK_ROOT = os.path.abspath(os.path.join(_THIS_DIR, os.pardir))
+_ABIS_DIR = os.path.join(_ORDERBOOK_ROOT, "abis")
 
-with open("abis/ERC20_abi.json", "r", encoding="utf-8") as f:
+with open(os.path.join(_ABIS_DIR, "ERC20_abi.json"), "r", encoding="utf-8") as f:
     ERC20_ABI = json.load(f)
 
-with open("abis/settlement_abi.json", "r", encoding="utf-8") as f:
+with open(os.path.join(_ABIS_DIR, "settlement_abi.json"), "r", encoding="utf-8") as f:
     TRADE_SETTLEMENT_ABI = json.load(f)
 
 
