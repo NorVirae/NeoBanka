@@ -24,7 +24,6 @@ const Index = () => {
               </div>
             </div>
             <div className="hidden md:block h-6 w-px bg-border"></div>
-            <Link to="/crosschain"><Button variant="outline" size="sm" className="border-neobanka-teal-500 hover:bg-neobanka-teal-500/10 text-neobanka-teal-400">Cross-Chain</Button></Link>
           </div>
           <WalletConnect />
         </div>
