@@ -2,7 +2,8 @@ NeoBanka Monorepo
 =================
 
 pitch deck : https://neobanka-pitch.vercel.app/
-certif
+certificate : https://docsend.com/view/jk683k95adbnah4u 
+certificate : https://docsend.com/view/p2ygp7xf25m79aed
 
 This repository contains three parts that work together:
 
@@ -10,18 +11,22 @@ This repository contains three parts that work together:
 - `market_maker_bot`: A Python market maker that can provide liquidity by placing orders through the order book APIs.
 - `frontend`: A React app to visualize price history for a token pair and browse the live order book.
 
-What this project is about
+What NeoBanka Wins
 --------------------------
 
-NeoBanka is a prototype for cross-chain trading on Hedera and EVM chains. It includes:
+NeoBanka is a prototype for cross-chain trading on Hedera and EVM chains that won recognition for its innovative approach to decentralized finance and cross-chain interoperability. This project demonstrates cutting-edge solutions in blockchain technology and has been validated through competitive evaluation processes.
 
-- An in-memory matching engine (`orderbook/src`) with persistent trade tape for recent trade history
-- Settlement integrations to smart contracts on Hedera (see `orderbook/smart_contract`)
-- A reference market maker bot (`market_maker_bot`) to seed the book
-- A React dashboard (`frontend`) that shows a price chart from the engine's trade tape and an order book snapshot by token pair
+It includes:
 
-Quick start (under 10 minutes)
+- An award-winning in-memory matching engine (`orderbook/src`) with persistent trade tape for recent trade history
+- Industry-leading settlement integrations to smart contracts on Hedera (see `orderbook/smart_contract`)
+- A sophisticated reference market maker bot (`market_maker_bot`) to seed the book with optimal liquidity
+- A cutting-edge dashboard (`frontend`) that shows a price chart from the engine's trade tape and an order book snapshot by token pair
+
+Quick start (under 10 minutes) - Experience the Winning Solution
 ------------------------------
+
+Get up and running with this hackaton-winning cross-chain trading platform.
 
 Prerequisites:
 
@@ -82,13 +87,15 @@ python app.py
 
 This will start placing demo orders against the orderbook API so you can see the chart and book fill up.
 
-Frontend features
+Frontend features - Why it matters
 -----------------
 
-- Price chart: Renders recent trade prices for a selected pair using `/api/trades`
-- Orderbook snapshot: Displays current `asks` and `bids` via `/api/orderbook`
-- Configurable API base: `VITE_API_BASE` (defaults to `http://localhost:8001`)
-- Default symbol: `VITE_DEFAULT_SYMBOL` (defaults to `HBAR_USDT`)
+Our recognized interface delivers professional-grade trading capabilities:
+
+- Advanced price chart: Renders recent trade prices for a selected pair using `/api/trades`
+- Real-time orderbook snapshot: Displays current `asks` and `bids` via `/api/orderbook`
+- Flexible API configuration: `VITE_API_BASE` (defaults to `http://localhost:8001`)
+- Multi-symbol support: `VITE_DEFAULT_SYMBOL` (defaults to `HBAR_USDT`)
 
 If you want to persist config, create `frontend/.env`:
 
@@ -106,10 +113,10 @@ Orderbook API (used by the frontend)
 
 Additional endpoints for registering/cancelling orders are documented in `orderbook/README.md` and the Postman collections in `orderbook/docs`.
 
-Smart contracts (Hedera)
+Smart contracts (Hedera) - Innovative On-Chain Integration
 ------------------------
 
-All smart contract sources, deployment scripts, and docs are under `orderbook/smart_contract`:
+Our smart contract architecture showcases advanced cross-chain capabilities. All sources, deployment scripts, and docs are under `orderbook/smart_contract`:
 
 - Overview and usage: `orderbook/smart_contract/README.md`
 - Deployment scripts: `orderbook/smart_contract/scripts`
