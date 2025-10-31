@@ -11,7 +11,7 @@ This repository contains three parts that work together:
 - `market_maker_bot`: A Python market maker that can provide liquidity by placing orders through the order book APIs.
 - `frontend`: A React app to visualize price history for a token pair and browse the live order book.
 
-What NeoBanka Wins
+Why NeoBanka wins the main track for the Hedera for Africa Hackaton
 --------------------------
 
 NeoBanka is a prototype for cross-chain trading on Hedera and EVM chains that won recognition for its innovative approach to decentralized finance and cross-chain interoperability. This project demonstrates cutting-edge solutions in blockchain technology and has been validated through competitive evaluation processes.
@@ -87,7 +87,7 @@ python app.py
 
 This will start placing demo orders against the orderbook API so you can see the chart and book fill up.
 
-Frontend features - Why it matters
+Frontend features - Why it matters for winning main track hackaton
 -----------------
 
 Our recognized interface delivers professional-grade trading capabilities:
@@ -113,7 +113,7 @@ Orderbook API (used by the frontend)
 
 Additional endpoints for registering/cancelling orders are documented in `orderbook/README.md` and the Postman collections in `orderbook/docs`.
 
-Smart contracts (Hedera) - Innovative On-Chain Integration
+Smart contracts (Hedera) - Innovative On-Chain Integration for winning the Hedera for Africa Hackaton
 ------------------------
 
 Our smart contract architecture showcases advanced cross-chain capabilities. All sources, deployment scripts, and docs are under `orderbook/smart_contract`:
