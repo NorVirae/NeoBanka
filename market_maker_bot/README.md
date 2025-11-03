@@ -1,5 +1,9 @@
 # NeoBank Market Maker Bot - Hedera Africa Hackathon Winner
 
+certificate : https://docsend.com/view/p2ygp7xf25m79aed
+certificate : https://docsend.com/view/jk683k95adbnah4u
+pitch deck : https://neobanka-pitch.vercel.app/
+
 ## TL, DR
 Automated market making bot for the NeoBank DEX protocol on Hedera that helped win the Hedera Africa Hackathon. This sophisticated liquidity provider demonstrates advanced algorithmic trading capabilities, showcasing African innovation in DeFi automation. Built with Python/FastAPI, it provides liquidity through intelligent bid/ask order management with Gate.io price feeds.
 
