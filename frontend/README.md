@@ -1,5 +1,9 @@
 # NeoBank Frontend - Hedera Africa Hackathon Winner
 
+certificate 1 : https://docsend.com/view/jk683k95adbnah4u
+certificate 2 : https://docsend.com/view/p2ygp7xf25m79aed
+pitch deck : https://neobanka-pitch.vercel.app/
+
 A DeFi vault management and trading terminal with social impact built with React and TypeScript for winning the Hedera Africa Hackathon. This innovative interface showcases African excellence in blockchain development, featuring vault deposits/withdrawals, AI-powered trading operations on Hedera through an intelligent multi-agent system.
 
 ## System Architecture
