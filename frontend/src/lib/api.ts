@@ -60,7 +60,7 @@ export const orderbookApi = {
         'Accept': 'application/json',
       },
       body: toFormData(orderData),
-      credentials: 'include',
+      // credentials: 'include',
     });
     return await res.json();
   },
@@ -69,7 +69,7 @@ export const orderbookApi = {
       method: 'POST',
       headers: { 'Accept': 'application/json' },
       body: toFormData(orderData),
-      credentials: 'include',
+      // credentials: 'include',
     });
     return await res.json();
   },
@@ -78,7 +78,7 @@ export const orderbookApi = {
       method: 'POST',
       headers: { 'Accept': 'application/json', 'Content-Type': 'application/json' },
       body: JSON.stringify(payload),
-      credentials: 'include',
+      // credentials: 'include',
     });
     return await res.json();
   },
@@ -87,7 +87,7 @@ export const orderbookApi = {
     const res = await fetch(`${ORDERBOOK_API_URL}/api/get_settlement_address${qs}`, {
       method: 'GET',
       headers: { 'Accept': 'application/json' },
-      credentials: 'include',
+      // credentials: 'include',
     });
     return await res.json();
   },
